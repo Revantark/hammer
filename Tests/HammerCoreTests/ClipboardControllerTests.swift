@@ -27,6 +27,23 @@ import Testing
         #expect(c.payload(id: c.history.entries[0].id) == [rep(PasteboardType.plainText, "hello")])
     }
 
+    @Test func imageCaptureWritesSmallListThumbnail() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let c = make(dir, pb)
+        pb.copy(PasteboardSnapshot(representations: [Representation(type: PasteboardType.png, data: makePNG(width: 2560, height: 1600))], sourceApp: nil))
+        c.poll()
+        let data = try #require(c.listThumbnailData(id: c.history.entries[0].id))
+        let image = try #require(ImageThumbnailer.thumbnail(data: data, maxPixelSize: 1_000))
+        #expect(max(image.width, image.height) == ClipboardController.listThumbnailPixels)
+    }
+
+    @Test func textCaptureHasNoThumbnail() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let c = make(dir, pb)
+        pb.copy(textSnapshot("hi")); c.poll()
+        #expect(c.listThumbnailData(id: c.history.entries[0].id) == nil)
+    }
+
     @Test func unchangedCountIgnored() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let pb = FakePasteboard(); let c = make(dir, pb)

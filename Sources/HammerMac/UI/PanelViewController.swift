@@ -12,9 +12,10 @@ public enum PanelKeyCommand: Equatable, Sendable {
     }
 }
 
-/// Supplies decoded, downscaled clipboard images.
+/// Supplies clipboard images: cheap list thumbnails and an async-decoded preview.
 @MainActor public protocol ThumbnailSource: AnyObject {
-    func thumbnail(for id: UUID, maxPixelSize: Int) -> CGImage?
+    func listThumbnail(for id: UUID) -> CGImage?
+    func preview(for id: UUID) async -> CGImage?
     func clear()
 }
 
@@ -56,7 +57,7 @@ enum PanelRow {
     private var clips: [ClipEntry] = []
     let preview = ClipboardPreviewView()
     private let previewDivider = NSView()
-    private static let listThumbPixels = 36
+    var previewTask: Task<Void, Never>?
     private var lastVisible = false
     private var lastMode: PanelMode?
     private var lastQuery: String?
@@ -302,6 +303,8 @@ enum PanelRow {
         lastMode = nil
         lastQuery = nil
         tableView.reloadData()
+        previewTask?.cancel()
+        previewTask = nil
         preview.clear()
         thumbnails.clear()
     }
@@ -316,13 +319,23 @@ enum PanelRow {
     }
 
     func selectionChanged() {
+        previewTask?.cancel()
+        previewTask = nil
         guard model.mode == .clipboard, let id = selectedClipID, let entry = clips.first(where: { $0.id == id }) else {
             preview.clear()
             return
         }
-        let image = entry.kind == .image ? thumbnails.thumbnail(for: id, maxPixelSize: ClipboardPreviewView.imagePixelSize) : nil
-        let payload = entry.kind == .text ? clipboard.payload(id: id) : nil
-        preview.show(entry: entry, payload: payload, image: image, now: clock.now())
+        switch entry.kind {
+        case .text:
+            preview.show(entry: entry, payload: clipboard.payload(id: id), image: nil, now: clock.now())
+        case .image:
+            preview.show(entry: entry, payload: nil, image: nil, now: clock.now())
+            previewTask = Task { [weak self, thumbnails] in
+                let image = await thumbnails.preview(for: id)
+                guard let self, !Task.isCancelled, self.model.isVisible, self.selectedClipID == id else { return }
+                self.preview.setImage(image)
+            }
+        }
     }
 
     func updateFooter() {
@@ -439,7 +452,7 @@ enum PanelRow {
             cell.trailing.stringValue = ""
             if entry.kind == .image {
                 cell.title.stringValue = "Image (\(entry.pixelWidth ?? 0)×\(entry.pixelHeight ?? 0))"
-                cell.iconView.image = thumbnails.thumbnail(for: entry.id, maxPixelSize: Self.listThumbPixels)
+                cell.iconView.image = thumbnails.listThumbnail(for: entry.id)
                     .map { NSImage(cgImage: $0, size: NSSize(width: 18, height: 18)) } ?? Self.textGlyph
             } else {
                 cell.title.stringValue = (entry.snippet ?? "").split(whereSeparator: \.isNewline).first.map(String.init)?

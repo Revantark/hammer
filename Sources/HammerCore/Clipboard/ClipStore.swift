@@ -7,12 +7,14 @@ public final class ClipStore: @unchecked Sendable {
 
     private let root: URL
     private let blobs: URL
+    private let thumbs: URL
     private var indexURL: URL { root.appendingPathComponent("index.json") }
     private let fm = FileManager.default
 
     public init(directory: URL) {
         root = directory.appendingPathComponent("clipboard", isDirectory: true)
         blobs = root.appendingPathComponent("blobs", isDirectory: true)
+        thumbs = root.appendingPathComponent("thumbs", isDirectory: true)
     }
 
     /// Missing → empty. Corrupt → empty, and the bad file is renamed to `index.corrupt.json`.
@@ -48,19 +50,35 @@ public final class ClipStore: @unchecked Sendable {
     }
 
     public func deletePayloads(_ ids: [UUID]) {
-        for id in ids { try? fm.removeItem(at: blobURL(id)) }
+        for id in ids {
+            try? fm.removeItem(at: blobURL(id))
+            try? fm.removeItem(at: thumbURL(id))
+        }
+    }
+
+    /// Small list thumbnail (PNG) saved at capture so opening the panel never decodes full images.
+    public func writeThumbnail(_ png: Data, id: UUID) throws {
+        try fm.createDirectory(at: thumbs, withIntermediateDirectories: true)
+        try png.write(to: thumbURL(id), options: .atomic)
+    }
+
+    public func readThumbnail(id: UUID) -> Data? {
+        try? Data(contentsOf: thumbURL(id))
     }
 
     /// Deletes blobs not referenced by history (recovers from crashes between blob and index writes).
     public func pruneOrphans(keeping ids: Set<UUID>) {
-        let keep = Set(ids.map { "\($0.uuidString).plist" })
-        guard let files = try? fm.contentsOfDirectory(atPath: blobs.path) else { return }
-        for file in files where !keep.contains(file) {
-            try? fm.removeItem(at: blobs.appendingPathComponent(file))
+        for (dir, ext) in [(blobs, "plist"), (thumbs, "png")] {
+            let keep = Set(ids.map { "\($0.uuidString).\(ext)" })
+            guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
+            for file in files where !keep.contains(file) {
+                try? fm.removeItem(at: dir.appendingPathComponent(file))
+            }
         }
     }
 
     private func blobURL(_ id: UUID) -> URL { blobs.appendingPathComponent("\(id.uuidString).plist") }
+    private func thumbURL(_ id: UUID) -> URL { thumbs.appendingPathComponent("\(id.uuidString).png") }
 
     private func decoder() -> JSONDecoder {
         let d = JSONDecoder()

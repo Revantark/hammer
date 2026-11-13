@@ -65,8 +65,7 @@ import HammerCore
         let copied = Self.relative(entry.copiedAt, now: now)
         switch entry.kind {
         case .image:
-            displayedImage = image
-            if let image { imageView.image = NSImage(cgImage: image, size: NSSize(width: image.width / 2, height: image.height / 2)) }
+            setImage(image)
             imageView.isHidden = false
             let dims = (entry.pixelWidth.map { w in entry.pixelHeight.map { "\(w) × \($0)" } } ?? nil) ?? "Unknown"
             metadataLines = [("Source", source), ("Dimensions", dims), ("Copied", copied)]
@@ -83,6 +82,13 @@ import HammerCore
             metadataLines = [("Source", source), ("Characters", count), ("Copied", copied)]
         }
         setMetaRows(metadataLines)
+        needsLayout = true
+    }
+
+    /// Sets (or clears) the preview image; used when the async decode finishes.
+    public func setImage(_ image: CGImage?) {
+        displayedImage = image
+        imageView.image = image.map { NSImage(cgImage: $0, size: NSSize(width: $0.width / 2, height: $0.height / 2)) }
         needsLayout = true
     }
 

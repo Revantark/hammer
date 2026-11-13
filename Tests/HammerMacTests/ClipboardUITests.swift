@@ -72,8 +72,9 @@ func pngData(width: Int, height: Int) -> Data {
         #expect(h.clipboard.history.entries.first?.snippet == "first")
     }
 
-    @Test func imagePreviewMetadata() {
+    @Test func imagePreviewMetadata() async {
         let h = harness(); copyImage(h); h.model.hotkey(.clipboard)
+        await h.controller.previewTask?.value
         let lines = h.controller.preview.metadataLines
         #expect(lines.map(\.label) == ["Source", "Dimensions", "Copied"])
         #expect(lines[0].value == "Screenshot")
@@ -94,6 +95,17 @@ func pngData(width: Int, height: Int) -> Data {
     @Test func previewCapsText() {
         let h = harness([String(repeating: "x", count: 5_000_000)]); h.model.hotkey(.clipboard)
         #expect(h.controller.preview.displayedText?.count == ClipboardPreviewView.textPreviewLimit)
+    }
+
+    @Test func stalePreviewIgnoredAfterSelectionMoves() async {
+        let h = harness(); copyImage(h); h.pasteboard.copyText("text"); h.clipboard.poll()
+        h.model.hotkey(.clipboard)            // "text" selected
+        h.controller.handleKey(.down)         // image selected → preview loading
+        let task = h.controller.previewTask
+        h.controller.handleKey(.up)           // back to text before the image arrives
+        await task?.value
+        #expect(h.controller.preview.displayedImage == nil)
+        #expect(h.controller.preview.displayedText == "text")
     }
 
     @Test func previewFollowsSelection() {
@@ -126,22 +138,57 @@ func pngData(width: Int, height: Int) -> Data {
 }
 
 @MainActor @Suite struct ClipThumbnailsTests {
-    @Test func thumbnailIsDownscaledAndCached() throws {
+    func harnessWithImages(_ count: Int) -> PanelHarness {
         let h = PanelHarness()
-        h.pasteboard.copy(PasteboardSnapshot(representations: [Representation(type: PasteboardType.png, data: pngData(width: 2560, height: 1600))], sourceApp: nil))
-        h.clipboard.poll()
-        let thumbs = ClipThumbnails(clipboard: h.clipboard)
-        let id = h.clipboard.history.entries[0].id
-        let image = try #require(thumbs.thumbnail(for: id, maxPixelSize: 840))
-        #expect(image.width == 840 && image.height == 525)
-        #expect(thumbs.thumbnail(for: id, maxPixelSize: 840) === image)
-        thumbs.clear()
-        #expect(thumbs.thumbnail(for: id, maxPixelSize: 840) !== image)
+        for i in 0..<count {
+            h.pasteboard.copy(PasteboardSnapshot(representations: [Representation(type: PasteboardType.png, data: pngData(width: 2560 + i, height: 1600))], sourceApp: nil))
+            h.clipboard.poll()
+        }
+        return h
     }
 
-    @Test func textEntryHasNoThumbnail() {
+    @Test func previewIsDownscaledAndCached() async throws {
+        let h = harnessWithImages(1)
+        let thumbs = ClipThumbnails(clipboard: h.clipboard)
+        let id = h.clipboard.history.entries[0].id
+        let image = try #require(await thumbs.preview(for: id))
+        #expect(image.width == 840 && image.height == 525)
+        #expect(await thumbs.preview(for: id) === image)
+    }
+
+    @Test func previewCacheHoldsOnlyOne() async {
+        let h = harnessWithImages(2)
+        let thumbs = ClipThumbnails(clipboard: h.clipboard)
+        _ = await thumbs.preview(for: h.clipboard.history.entries[0].id)
+        _ = await thumbs.preview(for: h.clipboard.history.entries[1].id)
+        #expect(thumbs.cachedPreviewCount == 1)
+    }
+
+    @Test func listThumbnailDoesNotTouchFullPayload() throws {
+        let h = harnessWithImages(1)
+        let id = h.clipboard.history.entries[0].id
+        // Remove the full payload: the list thumbnail must still load (proves no full-image decode on open).
+        try FileManager.default.removeItem(at: h.dir.appendingPathComponent("clipboard/blobs/\(id.uuidString).plist"))
+        let thumb = try #require(ClipThumbnails(clipboard: h.clipboard).listThumbnail(for: id))
+        #expect(max(thumb.width, thumb.height) == ClipboardController.listThumbnailPixels)
+    }
+
+    @Test func clearDropsPreviewKeepsListThumbnails() async {
+        let h = harnessWithImages(1)
+        let thumbs = ClipThumbnails(clipboard: h.clipboard)
+        let id = h.clipboard.history.entries[0].id
+        let list = thumbs.listThumbnail(for: id)
+        _ = await thumbs.preview(for: id)
+        thumbs.clear()
+        #expect(thumbs.cachedPreviewCount == 0)
+        #expect(thumbs.listThumbnail(for: id) === list)
+    }
+
+    @Test func textEntryHasNoThumbnail() async {
         let h = PanelHarness()
         h.pasteboard.copyText("hi"); h.clipboard.poll()
-        #expect(ClipThumbnails(clipboard: h.clipboard).thumbnail(for: h.clipboard.history.entries[0].id, maxPixelSize: 36) == nil)
+        let thumbs = ClipThumbnails(clipboard: h.clipboard)
+        #expect(thumbs.listThumbnail(for: h.clipboard.history.entries[0].id) == nil)
+        #expect(await thumbs.preview(for: h.clipboard.history.entries[0].id) == nil)
     }
 }

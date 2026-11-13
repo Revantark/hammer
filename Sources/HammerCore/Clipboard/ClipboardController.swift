@@ -22,10 +22,12 @@ public enum PasteOutcome: Equatable, Sendable {
 
 @MainActor public final class ClipboardController {
     public static let pollInterval: TimeInterval = 0.25
+    /// List-row thumbnail size: 18 pt at 2x.
+    public static let listThumbnailPixels = 36
     private static let log = Logger(subsystem: "dev.hammer", category: "clipboard")
 
     private let pasteboard: PasteboardAccess
-    private let store: ClipStore
+    public nonisolated let store: ClipStore
     private let clock: HammerClock
     private let makeID: () -> UUID
     private var lastSeenChangeCount: Int
@@ -54,6 +56,7 @@ public enum PasteOutcome: Equatable, Sendable {
         case .added(let evicted):
             do {
                 try store.writePayload(candidate.representations, id: candidate.entry.id)
+                if candidate.entry.kind == .image { try writeListThumbnail(candidate) }
             } catch {
                 Self.log.error("Writing clipboard payload failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -78,6 +81,17 @@ public enum PasteOutcome: Equatable, Sendable {
         }
         sender.sendPaste()
         return .pasted
+    }
+
+    public func listThumbnailData(id: UUID) -> Data? {
+        store.readThumbnail(id: id)
+    }
+
+    private func writeListThumbnail(_ candidate: ClipCandidate) throws {
+        guard let image = candidate.representations.first(where: { PasteboardType.imageTypes.contains($0.type) }),
+              let thumb = ImageThumbnailer.thumbnail(data: image.data, maxPixelSize: Self.listThumbnailPixels),
+              let png = ImageThumbnailer.pngData(thumb) else { return }
+        try store.writeThumbnail(png, id: candidate.entry.id)
     }
 
     public func payload(id: UUID) -> [Representation]? {

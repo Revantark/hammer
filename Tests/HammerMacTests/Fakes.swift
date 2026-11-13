@@ -40,7 +40,8 @@ final class FakeScanner: AppScanning, @unchecked Sendable {
 }
 
 @MainActor final class StubThumbnails: ThumbnailSource {
-    func thumbnail(for id: UUID, maxPixelSize: Int) -> CGImage? { nil }
+    func listThumbnail(for id: UUID) -> CGImage? { nil }
+    func preview(for id: UUID) async -> CGImage? { nil }
     func clear() {}
 }
 

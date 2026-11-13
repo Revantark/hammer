@@ -56,6 +56,33 @@ import Testing
         #expect(throws: (any Error).self) { try store.readPayload(id: orphan) }
     }
 
+    @Test func thumbnailRoundTrip() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir); let id = UUID()
+        try store.writeThumbnail(Data([1, 2, 3]), id: id)
+        #expect(store.readThumbnail(id: id) == Data([1, 2, 3]))
+        #expect(store.readThumbnail(id: UUID()) == nil)
+    }
+
+    @Test func deletePayloadsRemovesThumbnails() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir); let id = UUID()
+        try store.writePayload([rep(PasteboardType.plainText, "x")], id: id)
+        try store.writeThumbnail(Data([1]), id: id)
+        store.deletePayloads([id])
+        #expect(store.readThumbnail(id: id) == nil)
+    }
+
+    @Test func pruneOrphansRemovesOrphanThumbnailsKeepsReferenced() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir); let keep = UUID(), orphan = UUID()
+        try store.writeThumbnail(Data([1]), id: keep)
+        try store.writeThumbnail(Data([2]), id: orphan)
+        store.pruneOrphans(keeping: [keep])
+        #expect(store.readThumbnail(id: keep) == Data([1]))
+        #expect(store.readThumbnail(id: orphan) == nil)
+    }
+
     @Test func readMissingPayloadThrows() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         #expect(throws: (any Error).self) { try ClipStore(directory: dir).readPayload(id: UUID()) }

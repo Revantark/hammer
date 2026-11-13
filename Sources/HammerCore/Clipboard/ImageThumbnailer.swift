@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import UniformTypeIdentifiers
 
 public enum ImageThumbnailer {
     /// Decodes a downscaled image directly (never a full-resolution decode). Never upscales.
@@ -20,5 +21,12 @@ public enum ImageThumbnailer {
             kCGImageSourceThumbnailMaxPixelSize: limit,
         ]
         return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary)
+    }
+
+    public static func pngData(_ image: CGImage) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, nil)
+        return CGImageDestinationFinalize(dest) ? data as Data : nil
     }
 }
