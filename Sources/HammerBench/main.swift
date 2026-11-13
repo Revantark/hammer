@@ -58,6 +58,11 @@ func worstCaseArchiveEntries(at date: Date) -> [ClipEntry] {
         if r.p99 >= budgetMs { failed = true }
         print(String(format: "clipboard %-7@ p99 %.3f ms  max %.3f ms", "'\(q)'" as NSString, r.p99, r.max))
     }
+    for q in ["8(5+3*2+(4*2 + 5 - 10)/2)", "safari"] {
+        let r = measure { _ = Calculator.result(for: q) }
+        if r.p99 >= budgetMs { failed = true }
+        print(String(format: "calc     %-8@ p99 %.3f ms  max %.3f ms", "'\(q.prefix(8))'" as NSString, r.p99, r.max))
+    }
     // Worst-case 4-day archive: 1,000 entries of 2,000 characters.
     let archiveDir = FileManager.default.temporaryDirectory.appendingPathComponent("hammer-bench-\(UUID().uuidString)")
     defer { try? FileManager.default.removeItem(at: archiveDir) }

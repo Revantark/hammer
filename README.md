@@ -3,6 +3,7 @@
 A minimal macOS app launcher and clipboard manager. Swift + AppKit, no dependencies.
 
 - **⌘Space** — launcher: type, ↑/↓, Enter to open (or bring forward) an app. With an empty search, the 5 apps you opened last sit in a **Recent** section above all apps A–Z. Typing fuzzy-searches, ranked by how often and how recently you use each app.
+- **Calculator** in the launcher: type `8/32`, `10 % 3` or `8(5+3*2+(4*2 + 5 - 10)/2)` and the result shows on top; Enter copies it. `+ - * / ^`, `×` `÷`, parentheses (left open ones close themselves), `2(3)`-style multiplication, `%` (remainder between two numbers, percent otherwise: `200*10%` = 20), `sqrt()`/`√`, `pi`, `e`.
 - **⌥X** — clipboard: the latest 25 copies (text and images), newest first. Typing also searches everything you copied in the last 4 days (up to 1,000 older entries, newest 200 matches shown). ↑/↓ or Tab/⇧Tab to move, Enter pastes into the app you were in and moves the entry back to the top.
 - Both shortcuts can be changed in Settings (**⌘,** while the panel is open).
 

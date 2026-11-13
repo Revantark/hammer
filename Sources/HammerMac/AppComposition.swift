@@ -24,7 +24,7 @@ import HammerCore
         catalog = AppCatalog(scanner: scanner)
         launcher = LauncherController(search: LauncherSearch(sources: [AppsSource(catalog: catalog)]),
                                       store: FrecencyStore(fileURL: dataDirectory.appendingPathComponent("frecency.json")),
-                                      launcher: appLauncher, clock: clock)
+                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock)
         clipboard = ClipboardController(pasteboard: pasteboard, store: ClipStore(directory: dataDirectory), clock: clock)
         self.pasteSender = pasteSender
         self.clock = clock

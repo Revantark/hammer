@@ -82,7 +82,7 @@ func solidIcon(size: CGFloat = 64) -> NSImage {
     init(apps: [AppEntry] = [app("Safari"), app("Notes"), app("Slack")]) {
         let search = LauncherSearch(sources: [AppsSource(catalog: AppCatalog(scanner: FakeScanner(apps)))])
         launcher = LauncherController(search: search, store: FrecencyStore(fileURL: dir.appendingPathComponent("f.json")),
-                                      launcher: appLauncher, clock: clock)
+                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock)
         clipboard = ClipboardController(pasteboard: pasteboard, store: ClipStore(directory: dir), clock: clock)
     }
 

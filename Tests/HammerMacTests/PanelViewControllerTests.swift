@@ -61,6 +61,19 @@ import HammerCore
         #expect(!h.model.isVisible)
     }
 
+    @Test func calculationShowsFirstAndEnterCopiesIt() throws {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("8(5+3*2+(4*2 + 5 - 10)/2)")
+        #expect(h.controller.displayedHeaders.first == Calculator.section)
+        let cell = try #require(h.controller.tableView(h.controller.tableView, viewFor: nil, row: 1) as? ItemCellView)
+        #expect(cell.title.stringValue == "100")
+        #expect(cell.iconView.image === PanelViewController.calculatorGlyph)
+        h.controller.handleKey(.enter)
+        #expect(h.pasteboard.written.last == [Representation(type: PasteboardType.plainText, data: Data("100".utf8))])
+        #expect(h.appLauncher.opened.isEmpty)
+        #expect(!h.model.isVisible)
+    }
+
     @Test func enterWithNoResultsDoesNothing() {
         let h = PanelHarness().start(); h.model.hotkey(.launcher)
         h.type("zzzz")

@@ -3,9 +3,31 @@ import Testing
 @testable import HammerCore
 
 @MainActor @Suite struct LauncherControllerTests {
-    func make(_ apps: [AppEntry], storeURL: URL, launcher: FakeAppLauncher = FakeAppLauncher()) -> LauncherController {
+    func make(_ apps: [AppEntry], storeURL: URL, launcher: FakeAppLauncher = FakeAppLauncher(),
+              pasteboard: FakePasteboard = FakePasteboard()) -> LauncherController {
         let search = LauncherSearch(sources: [AppsSource(catalog: AppCatalog(scanner: FakeScanner(apps)))])
-        return LauncherController(search: search, store: FrecencyStore(fileURL: storeURL), launcher: launcher, clock: ManualClock())
+        return LauncherController(search: search, store: FrecencyStore(fileURL: storeURL), launcher: launcher,
+                                  pasteboard: pasteboard, clock: ManualClock())
+    }
+
+    @Test func calculationComesFirstAndEnterCopiesWithoutRecordingUsage() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let url = dir.appendingPathComponent("f.json")
+        let launcher = FakeAppLauncher(), pasteboard = FakePasteboard()
+        let c = make([app("2048 Game")], storeURL: url, launcher: launcher, pasteboard: pasteboard)
+        let results = c.results(for: "20*48")
+        #expect(results.first?.title == "960")
+        #expect(results.first?.section == Calculator.section)
+        c.perform(results[0])
+        #expect(pasteboard.written == [[rep(PasteboardType.plainText, "960")]])
+        #expect(launcher.opened.isEmpty)
+        #expect(FrecencyStore(fileURL: url).load().records.isEmpty)
+    }
+
+    @Test func noCalculationForAppNames() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let c = make([app("1Password")], storeURL: dir.appendingPathComponent("f.json"))
+        #expect(c.results(for: "1pass").map(\.title) == ["1Password"])
     }
 
     @Test func performOpensApp() {

@@ -475,7 +475,11 @@ enum PanelRow {
             cell.title.stringValue = result.title
             cell.trailing.stringValue = result.typeLabel
             cell.iconSize = Theme.iconSize
-            if case .openApp(let path) = result.action {
+            switch result.action {
+            case .copyText:
+                cell.iconPath = nil
+                cell.iconView.image = Self.calculatorGlyph
+            case .openApp(let path):
                 cell.iconPath = path
                 cell.iconView.image = icons.cachedIcon(forPath: path)
                 if cell.iconView.image == nil {
@@ -511,13 +515,19 @@ enum PanelRow {
     public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
 
     /// Small "T" tile for text entries.
-    static let textGlyph: NSImage = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
-        NSColor(white: 1, alpha: 0.08).setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
-        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                                                    .foregroundColor: NSColor(white: 1, alpha: 0.6)]
-        let size = ("T" as NSString).size(withAttributes: attrs)
-        ("T" as NSString).draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2), withAttributes: attrs)
-        return true
+    static let textGlyph = glyph("T", side: 18, fontSize: 10, radius: 4)
+    /// "=" tile for calculator results, app-icon sized.
+    static let calculatorGlyph = glyph("=", side: Theme.iconSize, fontSize: 17, radius: 7)
+
+    private static func glyph(_ text: String, side: CGFloat, fontSize: CGFloat, radius: CGFloat) -> NSImage {
+        NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in
+            NSColor(white: 1, alpha: 0.08).setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
+                                                        .foregroundColor: NSColor(white: 1, alpha: 0.6)]
+            let size = (text as NSString).size(withAttributes: attrs)
+            (text as NSString).draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2), withAttributes: attrs)
+            return true
+        }
     }
 }

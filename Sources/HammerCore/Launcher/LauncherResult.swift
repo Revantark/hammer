@@ -3,6 +3,8 @@ import Foundation
 /// What happens when a launcher result is chosen. Future sources add cases.
 public enum LauncherAction: Equatable, Sendable {
     case openApp(path: String)
+    /// Puts the text on the clipboard (calculator results).
+    case copyText(String)
 }
 
 public struct LauncherResult: Equatable, Sendable, Identifiable {

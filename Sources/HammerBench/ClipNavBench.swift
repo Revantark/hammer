@@ -29,7 +29,7 @@ import HammerMac
 
     let model = PanelModel()
     let launcher = LauncherController(search: LauncherSearch(sources: []), store: FrecencyStore(fileURL: dir.appendingPathComponent("f.json")),
-                                      launcher: BenchLauncher(), clock: SystemClock())
+                                      launcher: BenchLauncher(), pasteboard: pasteboard, clock: SystemClock())
     let controller = PanelViewController(model: model, launcher: launcher, clipboard: clipboard, pasteSender: BenchPasteSender(),
                                          icons: IconProvider(), thumbnails: ClipThumbnails(clipboard: clipboard), clock: SystemClock(),
                                          settings: { Settings() })

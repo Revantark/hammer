@@ -48,7 +48,7 @@ public struct ClipHistory: Codable, Equatable, Sendable {
     }
 
     public func search(_ query: String) -> [ClipEntry] {
-        ClipSearchIndex(entries).search(query)
+        ClipSearchIndex.isBlank(query) ? entries : ClipSearchIndex(entries).search(query)
     }
 
     public static func sections(_ entries: [ClipEntry], now: Date, calendar: Calendar, locale: Locale) -> [DaySection] {
