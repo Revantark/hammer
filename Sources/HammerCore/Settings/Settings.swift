@@ -4,7 +4,7 @@ public struct Settings: Codable, Equatable, Sendable {
     public var launcherHotkey = Hotkey.defaultLauncher
     public var clipboardHotkey = Hotkey.defaultClipboard
     public var launchAtLogin = true
-    public var showMenuBarIcon = true
+    public var showMenuBarIcon = false   // owner choice: icon costs ~3 MB idle
     public var didShowSpotlightNotice = false
 
     public init() {}

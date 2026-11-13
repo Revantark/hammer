@@ -21,7 +21,7 @@ import Testing
     @Test func defaults() {
         let s = Settings()
         #expect(s.launcherHotkey == .defaultLauncher && s.clipboardHotkey == .defaultClipboard)
-        #expect(s.launchAtLogin && s.showMenuBarIcon && !s.didShowSpotlightNotice)
+        #expect(s.launchAtLogin && !s.showMenuBarIcon && !s.didShowSpotlightNotice)
     }
     @Test func validateNeedsModifier() {
         #expect(Settings().validate(Hotkey(keyCode: 7, modifiers: .shift), for: .clipboard) == .needsModifier)
@@ -47,9 +47,9 @@ import Testing
     @Test func storeMissingKeysUseDefaults() throws {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let url = dir.appendingPathComponent("settings.json")
-        try Data(#"{"showMenuBarIcon":false}"#.utf8).write(to: url)
+        try Data(#"{"showMenuBarIcon":true}"#.utf8).write(to: url)
         let s = SettingsStore(fileURL: url).load()
-        #expect(!s.showMenuBarIcon && s.launchAtLogin && s.launcherHotkey == .defaultLauncher)
+        #expect(s.showMenuBarIcon && s.launchAtLogin && s.launcherHotkey == .defaultLauncher)
     }
     @Test func storeCorruptGivesDefaults() throws {
         let dir = makeTempDir(); defer { removeTempDir(dir) }

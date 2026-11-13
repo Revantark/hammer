@@ -16,8 +16,9 @@ Success means the owner can replace Raycast for their daily use of Cmd+Space and
 3. **Raycast-like look ("Frost")** that is neat and minimal (see §6).
 4. **Ultra-fast.** Hotkey to visible panel under 50 ms, and each keystroke to updated results under 16 ms (one frame).
 5. **Tiny memory.** Measured as Activity Monitor's "Memory" column (`phys_footprint`):
-   - **≤ 10 MB idle** (panel hidden)
+   - **≤ 10 MB idle** (panel hidden) on a fresh start
    - **≤ 30 MB with the panel open**, including when an image preview is shown
+   - *Owner decision 2026-11-13, after measurement:* once the panel has been used, idle settles higher (~18 MB, ~26 MB after an image preview) because AppKit/ImageIO heap fragmentation can't be handed back. Accepted (≤ 30 MB) instead of self-restarting the app.
 6. **Hotkeys you can change** from a Settings window.
 7. **Thorough, non-flaky tests** for every function (§9).
 8. **Ready to grow.** The launcher is built so files, calculator and unit conversions can be added later as new result sources, without changing the core (§5.3).
@@ -96,7 +97,7 @@ Settings persist across restarts.
 ### 5.6 App presence
 
 - No Dock icon and no Cmd+Tab entry (accessory activation policy).
-- A menu bar icon (hammer glyph) with **Settings…** and **Quit Hammer**. It can be hidden from Settings. If it's hidden, Cmd+, inside the panel is the way back to Settings.
+- A menu bar icon (hammer glyph) with **Settings…** and **Quit Hammer**. **Hidden by default** (owner decision 2026-11-13: the status item costs ~3 MB idle); it can be turned on in Settings. Cmd+, inside the panel always opens Settings.
 
 ### 5.7 Permissions and first run
 

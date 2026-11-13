@@ -15,6 +15,8 @@ import os
     private var settingsWindow: SettingsWindowController?
     private var pollTimer: Timer?
     private var debugHooks: DebugHooks?
+    /// Script-driven runs (memory/latency checks): no global hotkeys, no login item, no alerts, private pasteboard.
+    private let testMode = ProcessInfo.processInfo.environment["HAMMER_DEBUG_SIGNALS"] == "1"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let dataDirectory: URL
@@ -29,25 +31,26 @@ import os
             return
         }
 
-        composition = AppComposition(dataDirectory: dataDirectory, pasteboard: SystemPasteboard(),
+        let pasteboard = testMode ? SystemPasteboard(pasteboard: NSPasteboard(name: .init("dev.hammer.debug"))) : SystemPasteboard()
+        composition = AppComposition(dataDirectory: dataDirectory, pasteboard: pasteboard,
                                      scanner: FileSystemAppScanner(), watcher: FSEventsWatcher(),
                                      appLauncher: WorkspaceAppLauncher(), pasteSender: CGEventPasteSender(),
                                      hotkeys: hotKeyCenter, clock: SystemClock())
         thumbnails = ClipThumbnails(clipboard: composition.clipboard)
         hotKeyCenter.onPress = { [weak self] role in self?.hotkeyPressed(role) }
 
-        let failures = composition.start()
+        let failures = composition.start(registerHotkeys: !testMode)
         for (role, error) in failures {
             log.error("Hotkey for \(String(describing: role), privacy: .public) failed: \(String(describing: error), privacy: .public)")
         }
 
         updateStatusItem()
         startPolling()
-        applyLoginItemDefault()
+        if !testMode { applyLoginItemDefault() }
         debugHooks = DebugHooks(show: { [weak self] role in self?.hotkeyPressed(role) },
                                 hide: { [weak self] in self?.composition.model.hide() })
 
-        if composition.needsSpotlightNotice { showSpotlightNotice() }
+        if !testMode, composition.needsSpotlightNotice { showSpotlightNotice() }
         if !failures.isEmpty { showHotkeyFailureNotice(failures) }
     }
 

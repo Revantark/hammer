@@ -34,9 +34,9 @@ import HammerCore
     }
 
     /// Registers hotkeys and starts watching app folders. Returns hotkeys that failed to register.
-    public func start() -> [HotkeyRole: HotkeyRegistrationError] {
+    public func start(registerHotkeys: Bool = true) -> [HotkeyRole: HotkeyRegistrationError] {
         var failures: [HotkeyRole: HotkeyRegistrationError] = [:]
-        for role in [HotkeyRole.launcher, .clipboard] {
+        for role in [HotkeyRole.launcher, .clipboard] where registerHotkeys {
             do {
                 try hotkeys.apply(settings.hotkey(for: role), role: role)
             } catch let error as HotkeyRegistrationError {

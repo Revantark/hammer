@@ -21,6 +21,14 @@ import HammerCore
         #expect(watcher.started)
     }
 
+    @Test func startWithoutHotkeysOnlyWatches() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let applier = FakeHotkeyApplier(); let watcher = FakeWatcher()
+        #expect(make(dir, applier: applier, watcher: watcher).start(registerHotkeys: false).isEmpty)
+        #expect(applier.applied.isEmpty)
+        #expect(watcher.started)
+    }
+
     @Test func startReportsFailures() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let applier = FakeHotkeyApplier(); applier.error = .alreadyTaken
