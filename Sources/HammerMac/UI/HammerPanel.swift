@@ -32,6 +32,10 @@ public final class HammerPanel: NSPanel {
 
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if onKeyEquivalent?(event) == true { return true }
+        if let action = EditShortcuts.action(for: event), let responder = firstResponder,
+           responder.tryToPerform(action, with: self) {
+            return true
+        }
         return super.performKeyEquivalent(with: event)
     }
 }
