@@ -21,6 +21,7 @@ public enum PanelKeyCommand: Equatable, Sendable {
 enum PanelRow {
     case header(String)
     case app(LauncherResult)
+    case clip(ClipEntry)
 }
 
 /// The Frost panel's content: search field, result list, footer. Driven by `PanelModel`.
@@ -52,6 +53,10 @@ enum PanelRow {
     private var rows: [PanelRow] = []
     private var itemRows: [Int] = []          // item index → row index
     private var results: [LauncherResult] = []
+    private var clips: [ClipEntry] = []
+    let preview = ClipboardPreviewView()
+    private let previewDivider = NSView()
+    private static let listThumbPixels = 36
     private var lastVisible = false
     private var lastMode: PanelMode?
     private var lastQuery: String?
@@ -68,6 +73,7 @@ enum PanelRow {
         self.settings = settings
         super.init(nibName: nil, bundle: nil)
         model.onChange = { [weak self] in self?.render() }
+        clipboard.onChange = { [weak self] in self?.clipboardChanged() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -78,8 +84,13 @@ enum PanelRow {
     var displayedHeaders: [String] { rows.compactMap { if case .header(let t) = $0 { return t } else { return nil } } }
     var footerLeftText: String { footerLeft.stringValue }
     var footerRightText: String { footerRight.text }
+    var selectedClipID: UUID? { clips.indices.contains(model.selectedIndex) ? clips[model.selectedIndex].id : nil }
 
     public var preferredPanelSize: NSSize {
+        if model.mode == .clipboard {
+            return NSSize(width: Theme.clipboardWidth,
+                          height: Theme.searchHeight + 1 + Theme.clipboardBodyHeight + Theme.footerHeight)
+        }
         let listHeight: CGFloat
         if rows.isEmpty {
             listHeight = Theme.rowHeight
@@ -182,11 +193,25 @@ enum PanelRow {
     }
 
     func layoutBody(_ body: NSRect) {
-        scrollView.frame = body.insetBy(dx: 0, dy: Theme.listInset / 2)
+        let clipMode = model.mode == .clipboard
+        preview.isHidden = !clipMode
+        previewDivider.isHidden = !clipMode
+        var listFrame = body
+        if clipMode {
+            listFrame.size.width = floor(body.width * 0.44)
+            previewDivider.frame = NSRect(x: listFrame.maxX, y: body.minY, width: 1, height: body.height)
+            preview.frame = NSRect(x: listFrame.maxX + 1, y: body.minY, width: body.width - listFrame.width - 1, height: body.height)
+        }
+        scrollView.frame = listFrame.insetBy(dx: 0, dy: Theme.listInset / 2)
         tableView.tableColumns.first?.width = scrollView.contentSize.width
     }
 
-    func addBodySubviews(to container: NSView) {}
+    func addBodySubviews(to container: NSView) {
+        previewDivider.wantsLayer = true
+        previewDivider.layer?.backgroundColor = Theme.divider.cgColor
+        container.addSubview(previewDivider)
+        container.addSubview(preview)
+    }
 
     static func roundedMask(radius: CGFloat) -> NSImage {
         let edge = radius * 2 + 1
@@ -234,9 +259,23 @@ enum PanelRow {
     }
 
     func buildRows() {
-        results = launcher.results(for: model.query)
         rows = []
         itemRows = []
+        results = []
+        clips = []
+        if model.mode == .clipboard {
+            let matches = clipboard.history.search(model.query)
+            for section in ClipHistory.sections(matches, now: clock.now(), calendar: .current, locale: .current) {
+                rows.append(.header(section.title))
+                for entry in section.entries {
+                    itemRows.append(rows.count)
+                    rows.append(.clip(entry))
+                    clips.append(entry)
+                }
+            }
+            return
+        }
+        results = launcher.results(for: model.query)
         var sections: [String] = []
         var bySection: [String: [LauncherResult]] = [:]
         for r in results {
@@ -263,12 +302,36 @@ enum PanelRow {
         selectionChanged()
     }
 
-    func selectionChanged() {}
+    func selectionChanged() {
+        guard model.mode == .clipboard, let id = selectedClipID, let entry = clips.first(where: { $0.id == id }) else {
+            preview.clear()
+            return
+        }
+        let image = entry.kind == .image ? thumbnails.thumbnail(for: id, maxPixelSize: ClipboardPreviewView.imagePixelSize) : nil
+        let payload = entry.kind == .text ? clipboard.payload(id: id) : nil
+        preview.show(entry: entry, payload: payload, image: image, now: clock.now())
+    }
 
     func updateFooter() {
         let s = settings()
-        footerLeft.stringValue = "Hammer"
-        footerRight.setHints([("Open", "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
+        if model.mode == .clipboard {
+            let n = clipboard.history.entries.count
+            footerLeft.stringValue = "Clipboard · \(n) \(n == 1 ? "item" : "items")"
+            footerRight.setHints([("Paste", "↵"), ("Launcher", s.launcherHotkey.displayString)])
+        } else {
+            footerLeft.stringValue = "Hammer"
+            footerRight.setHints([("Open", "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
+        }
+    }
+
+    /// A copy arrived while the panel is open: refresh the list, keep the selection on the same entry.
+    func clipboardChanged() {
+        guard model.isVisible, model.mode == .clipboard else { return }
+        let oldIDs = clips.map(\.id.uuidString)
+        buildRows()
+        tableView.reloadData()
+        updateFooter()
+        model.itemsChanged(newIDs: clips.map(\.id.uuidString), oldIDs: oldIDs)
     }
 
     // MARK: Input
@@ -284,6 +347,11 @@ enum PanelRow {
     }
 
     func activateSelection() {
+        if model.mode == .clipboard {
+            guard let id = selectedClipID else { return }
+            _ = clipboard.paste(id: id, sender: pasteSender, beforePaste: { model.hide() })
+            return
+        }
         guard results.indices.contains(model.selectedIndex) else { return }
         let result = results[model.selectedIndex]
         model.hide()
@@ -324,7 +392,7 @@ enum PanelRow {
         return rowHeight
     }
 
-    var rowHeight: CGFloat { Theme.rowHeight }
+    var rowHeight: CGFloat { model.mode == .clipboard ? Theme.clipRowHeight : Theme.rowHeight }
 
     public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
         let view = SelectionRowView()
@@ -346,11 +414,40 @@ enum PanelRow {
             }()
             cell.title.stringValue = result.title
             cell.trailing.stringValue = result.typeLabel
+            cell.iconSize = Theme.iconSize
             if case .openApp(let path) = result.action { cell.iconView.image = icons.icon(forPath: path) }
+            cell.needsLayout = true
+            return cell
+        case .clip(let entry):
+            let cell = tableView.makeView(withIdentifier: .init("item"), owner: nil) as? ItemCellView ?? {
+                let c = ItemCellView(); c.identifier = .init("item"); return c
+            }()
+            cell.iconSize = 18
+            cell.trailing.stringValue = ""
+            if entry.kind == .image {
+                cell.title.stringValue = "Image (\(entry.pixelWidth ?? 0)×\(entry.pixelHeight ?? 0))"
+                cell.iconView.image = thumbnails.thumbnail(for: entry.id, maxPixelSize: Self.listThumbPixels)
+                    .map { NSImage(cgImage: $0, size: NSSize(width: 18, height: 18)) } ?? Self.textGlyph
+            } else {
+                cell.title.stringValue = (entry.snippet ?? "").split(whereSeparator: \.isNewline).first.map(String.init)?
+                    .trimmingCharacters(in: .whitespaces) ?? ""
+                cell.iconView.image = Self.textGlyph
+            }
             cell.needsLayout = true
             return cell
         }
     }
 
     public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+
+    /// Small "T" tile for text entries.
+    static let textGlyph: NSImage = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+        NSColor(white: 1, alpha: 0.08).setFill()
+        NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
+        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                                                    .foregroundColor: NSColor(white: 1, alpha: 0.6)]
+        let size = ("T" as NSString).size(withAttributes: attrs)
+        ("T" as NSString).draw(at: NSPoint(x: (rect.width - size.width) / 2, y: (rect.height - size.height) / 2), withAttributes: attrs)
+        return true
+    }
 }
