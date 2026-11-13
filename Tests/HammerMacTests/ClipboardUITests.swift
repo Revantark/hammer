@@ -62,6 +62,18 @@ func pngData(width: Int, height: Int) -> Data {
         #expect(h.controller.displayedRowCount == 1)
     }
 
+    @Test func searchReachesPastTheLatest25AndClosingFreesTheArchive() {
+        let h = harness((0..<26).map { String(format: "item-%02d", $0) }); h.model.hotkey(.clipboard)
+        #expect(h.controller.displayedRowCount == 25)
+        h.type("item-00")
+        #expect(h.controller.displayedRowCount == 1)
+        h.type("item")
+        #expect(h.controller.displayedRowCount == 26)
+        #expect(h.clipboard.isArchiveLoaded)
+        h.model.hide()
+        #expect(!h.clipboard.isArchiveLoaded)
+    }
+
     @Test func enterPastesSelected() {
         let h = harness(["first", "second"]); h.model.hotkey(.clipboard)
         h.controller.handleKey(.down)

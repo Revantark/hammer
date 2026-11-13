@@ -37,14 +37,41 @@ public enum PasteOutcome: Equatable, Sendable {
     public private(set) var history: ClipHistory
     public var onChange: (() -> Void)?
 
+    /// Rows show ~one line of an archived entry; the preview reads the payload.
+    static let archivedSnippetLimit = 300
+    /// The newest archived matches shown per search; typing more narrows them.
+    public static let archivedResultLimit = 200
+    /// The archive (entries older than the 25), opened only while searching (see `search`, `releaseSearch`);
+    /// dropped after any change and reopened on the next search.
+    private var archiveReader: ClipArchiveReader?
+    public var isArchiveLoaded: Bool { archiveReader != nil }
+
     public init(pasteboard: PasteboardAccess, store: ClipStore, clock: HammerClock, makeID: @escaping () -> UUID = UUID.init) {
         self.pasteboard = pasteboard
         self.store = store
         self.clock = clock
         self.makeID = makeID
         history = store.loadHistory()
-        store.pruneOrphans(keeping: Set(history.entries.map(\.id)))
         lastSeenChangeCount = pasteboard.changeCount
+        store.pruneOrphans(keeping: Set(history.entries.map(\.id) + store.archiveIDs()))
+    }
+
+    /// No query: the 25 history entries. Otherwise matches from the history, then from the last 4 days' archive.
+    public func search(_ query: String) -> [ClipEntry] {
+        let recent = history.search(query)
+        guard !ClipSearchIndex.isBlank(query) else { return recent }
+        let reader = archiveReader ?? {
+            updateArchive()   // drops what aged out since the last copy
+            return store.openArchive()
+        }()
+        archiveReader = reader
+        return recent + reader.search(query, excludingHashes: Set(history.entries.map(\.contentHash)),
+                                      limit: Self.archivedResultLimit, snippetLimit: Self.archivedSnippetLimit)
+    }
+
+    /// The panel closed: drop the archive from memory.
+    public func releaseSearch() {
+        archiveReader = nil
     }
 
     /// Called on a timer. Captures a new copy if the pasteboard changed since the last poll.
@@ -62,19 +89,34 @@ public enum PasteOutcome: Equatable, Sendable {
             } catch {
                 Self.log.error("Writing clipboard payload failed: \(error.localizedDescription, privacy: .public)")
             }
-            store.deletePayloads(evicted)
+            if !evicted.isEmpty { updateArchive(adding: evicted) }
         case .movedToTop:
             break
         }
+        archiveReader = nil
         save()
         onChange?()
     }
 
     /// Puts the entry back on the pasteboard, moves it to the top, then pastes (or asks for permission).
+    /// An archived entry moves back into the history (it's the newest copy again).
     public func paste(id: UUID, sender: PasteSending, beforePaste: () -> Void) -> PasteOutcome? {
-        guard history.entries.contains(where: { $0.id == id }), let reps = payload(id: id) else { return nil }
-        lastSeenChangeCount = pasteboard.write(reps)
-        history.moveToTop(id: id, at: clock.now())
+        if history.entries.contains(where: { $0.id == id }) {
+            guard let reps = payload(id: id) else { return nil }
+            lastSeenChangeCount = pasteboard.write(reps)
+            history.moveToTop(id: id, at: clock.now())
+        } else {
+            guard var entry = store.archivedEntry(id: id), let reps = payload(id: id) else { return nil }
+            lastSeenChangeCount = pasteboard.write(reps)
+            entry.copiedAt = clock.now()
+            switch history.insert(entry) {
+            case .added(let evicted):
+                updateArchive(adding: evicted, excluding: [id])
+            case .movedToTop:   // the same content is already in the history
+                updateArchive(excluding: [id])
+                store.deletePayloads([id])
+            }
+        }
         save()
         beforePaste()
         guard sender.isTrusted else {
@@ -110,9 +152,16 @@ public enum PasteOutcome: Equatable, Sendable {
 
     public func clearAll() {
         store.deletePayloads(history.removeAll())
+        store.deleteArchive()
+        archiveReader = nil
         store.pruneOrphans(keeping: [])
         save()
         onChange?()
+    }
+
+    private func updateArchive(adding evicted: [ClipEntry] = [], excluding: Set<UUID> = []) {
+        store.deletePayloads(store.updateArchive(adding: evicted, excluding: excluding, now: clock.now()))
+        archiveReader = nil
     }
 
     private func save() {

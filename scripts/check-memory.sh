@@ -13,7 +13,9 @@ scripts/build-app.sh >/dev/null
 BIN="$PWD/build/Hammer.app/Contents/MacOS/Hammer"
 WORK=$(mktemp -d)
 OUT="$WORK/stdout.log"
-HAMMER_DATA_DIR="$WORK/data" HAMMER_DEBUG_SIGNALS=1 "$BIN" >"$OUT" 2>"$WORK/stderr.log" &
+# Worst-case clipboard archive (1,000 entries × 2,000 characters), searched after the screenshot step.
+swift run -c release HammerBench seedarchive "$WORK/data" >/dev/null
+HAMMER_DATA_DIR="$WORK/data" HAMMER_DEBUG_SIGNALS=1 HAMMER_DEBUG_CLIP_QUERY="nvim" "$BIN" >"$OUT" 2>"$WORK/stderr.log" &
 PID=$!
 trap 'kill $PID 2>/dev/null || true; rm -rf "$WORK"' EXIT
 
@@ -41,15 +43,17 @@ sips -z 1600 2560 "/System/Library/Desktop Pictures/.thumbnails/Calibrate 5120x3
 osascript -l JavaScript -e "ObjC.import('AppKit'); var pb = \$.NSPasteboard.pasteboardWithName('dev.hammer.debug'); pb.clearContents; pb.setDataForType(\$.NSData.dataWithContentsOfFile('$PNG'), 'public.png');" >/dev/null
 sleep 1   # > one clipboard poll interval
 kill -USR2 $PID; CLIPBOARD=$(stable)
+kill -INFO $PID; SEARCH=$(stable)   # types "nvim": all 1,000 archived entries match, a long text is previewed
 kill -HUP $PID; AFTER=$(stable)
 
 printf "%-28s %8s %8s\n" "state" "MB" "budget"
 printf "%-28s %8s %8s\n" "idle" "$IDLE" "$IDLE_MAX"
 printf "%-28s %8s %8s\n" "launcher open" "$LAUNCHER" "$OPEN_MAX"
 printf "%-28s %8s %8s\n" "clipboard open (2560x1600)" "$CLIPBOARD" "$OPEN_MAX"
+printf "%-28s %8s %8s\n" "clipboard search (archive)" "$SEARCH" "$OPEN_MAX"
 printf "%-28s %8s %8s\n" "idle after use" "$AFTER" "$AFTER_MAX"
 PEAK=$(footprint -f bytes --noCategories -p "$PID" 2>/dev/null | awk '/phys_footprint_peak:/ {printf "%.1f", $2/1048576; exit}')
 echo "peak: $PEAK MB"
 
-awk -v i="$IDLE" -v l="$LAUNCHER" -v c="$CLIPBOARD" -v a="$AFTER" -v im="$IDLE_MAX" -v om="$OPEN_MAX" -v am="$AFTER_MAX" \
-    'BEGIN { exit !(i <= im && a <= am && l <= om && c <= om) }' && echo "PASS" || { echo "FAIL: over budget"; exit 1; }
+awk -v i="$IDLE" -v l="$LAUNCHER" -v c="$CLIPBOARD" -v s="$SEARCH" -v a="$AFTER" -v im="$IDLE_MAX" -v om="$OPEN_MAX" -v am="$AFTER_MAX" \
+    'BEGIN { exit !(i <= im && a <= am && l <= om && c <= om && s <= om) }' && echo "PASS" || { echo "FAIL: over budget"; exit 1; }

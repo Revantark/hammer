@@ -10,6 +10,7 @@ public final class ClipStore: @unchecked Sendable {
     private let thumbs: URL
     private let previews: URL
     private var indexURL: URL { root.appendingPathComponent("index.json") }
+    private var archiveURL: URL { root.appendingPathComponent("archive.tsv") }
     private let fm = FileManager.default
 
     public init(directory: URL) {
@@ -38,6 +39,60 @@ public final class ClipStore: @unchecked Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         try encoder.encode(history).write(to: indexURL, options: .atomic)
+    }
+
+    // MARK: Archive
+    // `archive.tsv`, newest first, one `ClipArchiveLine` per entry. Updates read only the line headers from the
+    // memory-mapped file and search scans its pre-folded keys, so neither decodes the archive (decoding 1,000 long
+    // entries left ~5 MB of heap behind).
+
+    /// Adds `entries` (newest first) in front, removes `excluding`, applies `ClipArchive.retain`, rewrites the file.
+    /// Returns the IDs whose payloads should be deleted.
+    public func updateArchive(adding entries: [ClipEntry], excluding: Set<UUID> = [], now: Date) -> [UUID] {
+        let added = entries.compactMap(ClipArchiveLine.encode)
+        let existing = archiveLines()
+        let (kept, dropped) = ClipArchive.retain(added + existing, now: now, excluding: excluding)
+        guard kept.count != existing.count || !added.isEmpty || !dropped.isEmpty else { return [] }
+        do {
+            if kept.isEmpty {
+                deleteArchive()
+            } else {
+                try fm.createDirectory(at: root, withIntermediateDirectories: true)
+                var out = Data(capacity: kept.reduce(0) { $0 + $1.bytes.count })
+                for line in kept { out.append(line.bytes) }
+                try out.write(to: archiveURL, options: .atomic)
+            }
+        } catch {
+            Self.log.error("Saving clipboard archive failed: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+        return dropped
+    }
+
+    public func openArchive() -> ClipArchiveReader {
+        ClipArchiveReader(lines: archiveLines())
+    }
+
+    /// Every archived entry, newest first. Lines that don't decode are skipped.
+    public func loadArchive() -> [ClipEntry] {
+        archiveLines().compactMap { $0.decode() }
+    }
+
+    public func archivedEntry(id: UUID) -> ClipEntry? {
+        archiveLines().first { $0.id == id }?.decode()
+    }
+
+    public func archiveIDs() -> [UUID] {
+        archiveLines().map(\.id)
+    }
+
+    public func deleteArchive() {
+        try? fm.removeItem(at: archiveURL)
+    }
+
+    private func archiveLines() -> [ClipArchiveLine] {
+        guard let data = try? Data(contentsOf: archiveURL, options: .alwaysMapped) else { return [] }
+        return ClipArchiveLine.parse(data)
     }
 
     public func writePayload(_ reps: [Representation], id: UUID) throws {

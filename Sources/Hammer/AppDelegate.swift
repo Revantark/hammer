@@ -48,7 +48,8 @@ import os
         startPolling()
         if !testMode { applyLoginItemDefault() }
         debugHooks = DebugHooks(show: { [weak self] role in self?.hotkeyPressed(role) },
-                                hide: { [weak self] in self?.composition.model.hide() })
+                                hide: { [weak self] in self?.composition.model.hide() },
+                                search: { [weak self] in self?.composition.model.setQuery($0) })
 
         if !testMode, composition.needsSpotlightNotice { showSpotlightNotice() }
         if !failures.isEmpty { showHotkeyFailureNotice(failures) }

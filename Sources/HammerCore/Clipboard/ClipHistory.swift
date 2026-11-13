@@ -1,7 +1,8 @@
 import Foundation
 
 public enum InsertOutcome: Equatable, Sendable {
-    case added(evicted: [UUID])
+    /// `evicted`: entries pushed out of the 25, newest first.
+    case added(evicted: [ClipEntry])
     case movedToTop(existingID: UUID)
 }
 
@@ -29,7 +30,7 @@ public struct ClipHistory: Codable, Equatable, Sendable {
         }
         entries.insert(entry, at: 0)
         guard entries.count > Self.capacity else { return .added(evicted: []) }
-        let evicted = entries[Self.capacity...].map(\.id)
+        let evicted = Array(entries[Self.capacity...])
         entries.removeLast(entries.count - Self.capacity)
         return .added(evicted: evicted)
     }
@@ -47,13 +48,7 @@ public struct ClipHistory: Codable, Equatable, Sendable {
     }
 
     public func search(_ query: String) -> [ClipEntry] {
-        let q = fold(query.trimmingCharacters(in: .whitespacesAndNewlines))
-        guard !q.isEmpty else { return entries }
-        return entries.filter { entry in
-            if let s = entry.snippet, fold(s).contains(q) { return true }
-            if let app = entry.sourceApp, fold(app).contains(q) { return true }
-            return entry.kind == .image && "image".contains(q)
-        }
+        ClipSearchIndex(entries).search(query)
     }
 
     public static func sections(_ entries: [ClipEntry], now: Date, calendar: Calendar, locale: Locale) -> [DaySection] {
@@ -85,9 +80,5 @@ public struct ClipHistory: Codable, Equatable, Sendable {
         }
         flush()
         return sections
-    }
-
-    private func fold(_ s: String) -> String {
-        s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }
 }

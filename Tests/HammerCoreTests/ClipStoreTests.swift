@@ -130,3 +130,73 @@ import Testing
         #expect(t.width == 40 && t.height == 20)
     }
 }
+
+@Suite struct ClipStoreArchiveTests {
+    let now = Date(timeIntervalSince1970: 1_794_571_200)
+
+    @Test func archiveRoundTripNewestFirst() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        let a = textEntry("a\twith\ttabs\nand lines", at: now.addingTimeInterval(-20)), b = imageEntry(at: now.addingTimeInterval(-10))
+        #expect(store.updateArchive(adding: [a], now: now).isEmpty)
+        #expect(store.updateArchive(adding: [b], now: now).isEmpty)
+        #expect(ClipStore(directory: dir).loadArchive() == [b, a])
+        #expect(store.archiveIDs() == [b.id, a.id])
+        #expect(store.archivedEntry(id: a.id) == a)
+        #expect(store.archivedEntry(id: UUID()) == nil)
+    }
+
+    @Test func updateAppliesRetentionAndExclusion() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        let stale = textEntry("stale", at: now.addingTimeInterval(-5 * 86_400))
+        let old = textEntry("dup", at: now.addingTimeInterval(-60)), keep = textEntry("keep", at: now.addingTimeInterval(-50))
+        _ = store.updateArchive(adding: [keep, old, stale], now: now.addingTimeInterval(-5 * 86_400))
+        let new = textEntry("dup", at: now)
+        #expect(Set(store.updateArchive(adding: [new], now: now)) == [old.id, stale.id])
+        #expect(store.loadArchive().map(\.id) == [new.id, keep.id])
+        #expect(store.updateArchive(adding: [], excluding: [keep.id], now: now).isEmpty)
+        #expect(store.loadArchive().map(\.id) == [new.id])
+    }
+
+    @Test func missingArchiveIsEmptyAndCorruptLinesAreSkipped() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        #expect(store.loadArchive().isEmpty)
+        #expect(store.archiveIDs().isEmpty)
+        let good = textEntry("good", at: now)
+        _ = store.updateArchive(adding: [good], now: now)
+        let url = dir.appendingPathComponent("clipboard/archive.tsv")
+        var data = try Data(contentsOf: url)
+        data.append(Data("garbage line\n1\tnot-a-uuid\th\tk\t{}\n".utf8))
+        try data.write(to: url)
+        #expect(store.loadArchive() == [good])
+        #expect(store.archiveIDs() == [good.id])
+    }
+
+    @Test func deleteArchive() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        _ = store.updateArchive(adding: [textEntry("x", at: now)], now: now)
+        store.deleteArchive()
+        #expect(store.loadArchive().isEmpty)
+    }
+
+    @Test func readerSearchesFoldedKeysAndDecodesOnlyMatches() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        let long = textEntry(String(repeating: "a", count: 1_000) + "\tCrème\nbrûlée", at: now.addingTimeInterval(-1))
+        let inHistory = textEntry("crème again", at: now.addingTimeInterval(-2))
+        let image = imageEntry(at: now.addingTimeInterval(-3))
+        _ = store.updateArchive(adding: [long, inHistory, image], now: now)
+        let reader = store.openArchive()
+        #expect(reader.count == 3)
+        let found = reader.search("CREME", excludingHashes: [inHistory.contentHash], limit: 10, snippetLimit: 300)
+        #expect(found.map(\.id) == [long.id])
+        #expect(found.first?.snippet?.count == 300)
+        #expect(found.first?.charCount == long.charCount)
+        #expect(reader.search("brulee", excludingHashes: [], limit: 10, snippetLimit: 300).map(\.id) == [long.id])
+        #expect(reader.search("imag", excludingHashes: [], limit: 10, snippetLimit: 300).map(\.id) == [image.id])
+        #expect(reader.search("e", excludingHashes: [], limit: 2, snippetLimit: 300).map(\.id) == [long.id, inHistory.id])
+    }
+}

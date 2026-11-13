@@ -3,7 +3,7 @@
 A minimal macOS app launcher and clipboard manager. Swift + AppKit, no dependencies.
 
 - **⌘Space** — launcher: type, ↑/↓, Enter to open (or bring forward) an app. With an empty search, the 5 apps you opened last sit in a **Recent** section above all apps A–Z. Typing fuzzy-searches, ranked by how often and how recently you use each app.
-- **⌥X** — clipboard: the latest 25 copies (text and images), newest first, searchable. ↑/↓ or Tab/⇧Tab to move, Enter pastes into the app you were in.
+- **⌥X** — clipboard: the latest 25 copies (text and images), newest first. Typing also searches everything you copied in the last 4 days (up to 1,000 older entries, newest 200 matches shown). ↑/↓ or Tab/⇧Tab to move, Enter pastes into the app you were in and moves the entry back to the top.
 - Both shortcuts can be changed in Settings (**⌘,** while the panel is open).
 
 ## Build and install
@@ -29,7 +29,7 @@ Hammer has no Dock icon. The menu bar icon is **off by default** because it cost
 
 ## Data
 
-`~/Library/Application Support/Hammer/` holds `settings.json`, `frecency.json` (launcher usage) and `clipboard/` (history index plus one file per entry). Everything you copy is recorded, including copies from password managers. Settings → "Clear Clipboard History…" deletes it all.
+`~/Library/Application Support/Hammer/` holds `settings.json`, `frecency.json` (launcher usage) and `clipboard/` (`index.json` for the latest 25, `archive.tsv` for the 4 days before them, plus one file per entry). Everything you copy is recorded, including copies from password managers. Settings → "Clear Clipboard History…" deletes it all.
 
 ## Development
 
@@ -37,7 +37,7 @@ Hammer has no Dock icon. The menu bar icon is **off by default** because it cost
 swift test                 # unit tests (Swift Testing)
 scripts/test-repeat.sh 5   # whole suite 5× to catch flaky tests
 scripts/check-latency.sh   # keystroke→results p99 < 16 ms, each ↓ through the clipboard p95 < 16 ms, hotkey→visible p95 < 50 ms
-scripts/check-memory.sh    # Activity Monitor "Memory": fresh idle ≤ 10 MB, open ≤ 30 MB, idle after use ≤ 30 MB
+scripts/check-memory.sh    # Activity Monitor "Memory": fresh idle ≤ 10 MB, open ≤ 30 MB (incl. searching a full 1,000-entry archive), idle after use ≤ 30 MB
 ```
 
 The check scripts run Hammer in a test mode (`HAMMER_DEBUG_SIGNALS=1`): no global hotkeys, no login item, a temp data folder and a private pasteboard. It never touches your real shortcuts or clipboard.

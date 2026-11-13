@@ -98,12 +98,121 @@ import Testing
         #expect(blobCount(dir) == 2)
     }
 
-    @Test func evictionDeletesBlob() {
+    /// Copies "item-00" … "item-<n-1>", one minute apart.
+    func copyItems(_ n: Int, _ pb: FakePasteboard, _ c: ClipboardController, _ clock: ManualClock) {
+        for i in 0..<n {
+            pb.copy(textSnapshot(String(format: "item-%02d", i))); c.poll()
+            clock.advance(by: 60)
+        }
+    }
+
+    @Test func evictedEntryMovesToArchiveAndStaysSearchable() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
-        let pb = FakePasteboard(); let c = make(dir, pb)
-        for i in 0..<26 { pb.copy(textSnapshot("\(i)")); c.poll() }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
         #expect(c.history.entries.count == 25)
+        #expect(blobCount(dir) == 26)
+        #expect(c.search("").count == 25)
+        #expect(c.search("item-00").map(\.snippet) == ["item-00"])
+        let all = c.search("item")
+        #expect(all.count == 26)
+        #expect(all.last?.snippet == "item-00")
+    }
+
+    @Test func archivedEntriesOlderThanFourDaysAreDeleted() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        clock.advance(by: 4 * 86_400)
+        pb.copy(textSnapshot("new")); c.poll()
+        #expect(c.search("item-00").isEmpty)
+        #expect(c.search("item-01").isEmpty)
         #expect(blobCount(dir) == 25)
+    }
+
+    @Test func searchDropsArchiveEntriesThatAgedOut() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        clock.advance(by: 4 * 86_400)
+        #expect(c.search("item-00").isEmpty)
+        #expect(blobCount(dir) == 25)
+    }
+
+    @Test func archiveSurvivesRestart() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        let reopened = make(dir, pb, clock: clock)
+        #expect(blobCount(dir) == 26)
+        let found = reopened.search("item-00")
+        #expect(found.map(\.snippet) == ["item-00"])
+        #expect(reopened.payload(id: found[0].id) == [rep(PasteboardType.plainText, "item-00")])
+    }
+
+    @Test func archiveLoadsOnlyWhileSearching() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        #expect(!c.isArchiveLoaded)
+        _ = c.search("")
+        #expect(!c.isArchiveLoaded)
+        _ = c.search("item")
+        #expect(c.isArchiveLoaded)
+        c.releaseSearch()
+        #expect(!c.isArchiveLoaded)
+    }
+
+    @Test func copyWhileSearchingUpdatesArchiveResults() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        #expect(c.search("item").count == 26)
+        pb.copy(textSnapshot("item-new")); c.poll()
+        let found = c.search("item")
+        #expect(found.count == 27)
+        #expect(found.first?.snippet == "item-new")
+        #expect(found.map(\.snippet).suffix(2) == ["item-01", "item-00"])
+    }
+
+    @Test func pastingArchivedEntryMovesItBackToRecent() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        let archived = c.search("item-00")[0]
+        let log = EventLog(); let sender = FakePasteSender(log: log)
+        #expect(c.paste(id: archived.id, sender: sender, beforePaste: { log.events.append("hide") }) == .pasted)
+        #expect(pb.written.last == [rep(PasteboardType.plainText, "item-00")])
+        #expect(log.events == ["hide", "paste"])
+        #expect(c.history.entries.first?.id == archived.id)
+        #expect(c.history.entries.first?.copiedAt == clock.now())
+        #expect(c.history.entries.count == 25)
+        #expect(c.search("item-00").map(\.id) == [archived.id])
+        #expect(c.search("item-01").map(\.snippet) == ["item-01"])
+        #expect(blobCount(dir) == 26)
+        #expect(make(dir, pb, clock: clock).search("item").count == 26)
+    }
+
+    @Test func recopyingArchivedContentShowsItOnce() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        _ = c.search("item")
+        pb.copy(textSnapshot("item-00")); c.poll()
+        let found = c.search("item-00")
+        #expect(found.count == 1)
+        #expect(found.first?.id == c.history.entries.first?.id)
+    }
+
+    @Test func clearAllRemovesArchive() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let clock = ManualClock(); let c = make(dir, pb, clock: clock)
+        copyItems(26, pb, c, clock)
+        _ = c.search("item")
+        c.clearAll()
+        #expect(c.search("item").isEmpty)
+        #expect(blobCount(dir) == 0)
+        #expect(make(dir, pb, clock: clock).search("item").isEmpty)
     }
 
     @Test func historyPersistsAcrossInstances() {

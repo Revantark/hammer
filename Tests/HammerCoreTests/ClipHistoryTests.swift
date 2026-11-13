@@ -24,7 +24,7 @@ func imageEntry(at date: Date = Date(timeIntervalSince1970: 1_794_571_200), sour
         _ = h.insert(first)
         for i in 1..<25 { _ = h.insert(textEntry("\(i)")) }
         #expect(h.entries.count == 25)
-        #expect(h.insert(textEntry("25")) == .added(evicted: [first.id]))
+        #expect(h.insert(textEntry("25")) == .added(evicted: [first]))
         #expect(h.entries.count == 25)
         #expect(h.entries.first?.snippet == "25")
     }

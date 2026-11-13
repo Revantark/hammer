@@ -270,7 +270,7 @@ enum PanelRow {
         results = []
         clips = []
         if model.mode == .clipboard {
-            let matches = clipboard.history.search(model.query)
+            let matches = clipboard.search(model.query)
             for section in ClipHistory.sections(matches, now: clock.now(), calendar: .current, locale: .current) {
                 rows.append(.header(section.title))
                 for entry in section.entries {
@@ -332,6 +332,7 @@ enum PanelRow {
         iconPrefetch?.cancel()
         iconPrefetch = nil
         preview.clear()
+        clipboard.releaseSearch()
         thumbnails.clear()
     }
 
