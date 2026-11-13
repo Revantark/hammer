@@ -19,9 +19,15 @@ public struct FileSystemAppScanner: AppScanning {
         let fm = FileManager.default
         var apps: [AppEntry] = []
         for root in roots {
+            // Not `.skipsHiddenFiles`: /Applications/Safari.app is a symlink carrying the BSD "hidden" flag.
             guard let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey],
-                                                 options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { continue }
-            for case let url as URL in enumerator where url.pathExtension == "app" {
+                                                 options: [.skipsPackageDescendants]) else { continue }
+            for case let url as URL in enumerator {
+                if url.lastPathComponent.hasPrefix(".") {
+                    enumerator.skipDescendants()
+                    continue
+                }
+                guard url.pathExtension == "app" else { continue }
                 enumerator.skipDescendants()
                 apps.append(AppEntry(name: Self.displayName(url), path: url.path, bundleID: Self.bundleID(url)))
             }

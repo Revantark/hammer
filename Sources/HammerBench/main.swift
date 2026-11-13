@@ -32,6 +32,9 @@ import HammerMac
 
     print("apps indexed: \(catalog.apps.count)")
     var failed = false
+    let top = search.search("saf", frecency: Frecency(), now: Date()).first?.title
+    print("'saf' → \(top ?? "nothing")")
+    if top != "Safari" { print("FAIL: Safari not found for 'saf'"); failed = true }
     let queries = (UInt8(ascii: "a")...UInt8(ascii: "z")).map { String(UnicodeScalar($0)) } + ["sa", "saf", "vsc", "term", "sys set", "xyzq"]
     for q in queries {
         let r = measure { _ = search.search(q, frecency: frecency, now: Date()) }
