@@ -20,3 +20,22 @@ func removeTempDir(_ url: URL) {
 }
 
 let day: TimeInterval = 86_400
+
+final class FakeScanner: AppScanning, @unchecked Sendable {
+    var apps: [AppEntry]
+    let roots: [URL] = [URL(fileURLWithPath: "/Applications")]
+    init(_ apps: [AppEntry]) { self.apps = apps }
+    func scan() -> [AppEntry] { apps }
+}
+
+@MainActor final class FakeWatcher: DirectoryWatching {
+    private(set) var startedPaths: [URL] = []
+    private var handler: (@MainActor () -> Void)?
+    func start(paths: [URL], onChange: @escaping @MainActor () -> Void) { startedPaths = paths; handler = onChange }
+    func stop() { handler = nil }
+    func fire() { handler?() }
+}
+
+func app(_ name: String, _ path: String? = nil, bundleID: String? = nil) -> AppEntry {
+    AppEntry(name: name, path: path ?? "/Applications/\(name).app", bundleID: bundleID ?? "com.test.\(name.lowercased())")
+}
