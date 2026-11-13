@@ -10,6 +10,41 @@ import HammerCore
         #expect(h.controller.displayedHeaders == ["Applications"])
     }
 
+    @Test func appIconsLoadOffTheMainThreadAndFillRows() async throws {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        await h.controller.iconPrefetch?.value
+        #expect(h.iconLoads.calls == 3)
+        #expect(h.iconLoads.onMain == 0)
+        let cell = try #require(h.controller.tableView.view(atColumn: 0, row: 1, makeIfNecessary: true) as? ItemCellView)
+        #expect(cell.iconView.image != nil)
+    }
+
+    @Test func prefetchCoversOnlyTheFirstScreens() async {
+        let h = PanelHarness(apps: (0..<40).map { app(String(format: "App%02d", $0)) }).start()
+        h.model.hotkey(.launcher)
+        await h.controller.iconPrefetch?.value
+        #expect(h.iconLoads.calls == PanelViewController.iconPrefetchLimit)
+    }
+
+    @Test func reopeningUsesCachedIcons() async {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        await h.controller.iconPrefetch?.value
+        h.model.hide(); h.model.hotkey(.launcher)
+        await h.controller.iconPrefetch?.value
+        #expect(h.iconLoads.calls == 3)
+    }
+
+    @Test func recentlyOpenedAppListedFirstUnderRecent() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("sla"); h.controller.handleKey(.enter)
+        h.model.hotkey(.launcher)
+        #expect(h.controller.displayedHeaders == ["Recent", "Applications"])
+        #expect(h.controller.displayedRowCount == 3)
+        h.controller.handleKey(.enter)
+        #expect(h.appLauncher.opened.count == 2)
+        #expect(h.appLauncher.opened[1] == h.appLauncher.opened[0])
+    }
+
     @Test func typingFiltersRows() {
         let h = PanelHarness().start(); h.model.hotkey(.launcher)
         h.type("saf")

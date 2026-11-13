@@ -58,6 +58,8 @@ enum PanelRow {
     let preview = ClipboardPreviewView()
     private let previewDivider = NSView()
     var previewTask: Task<Void, Never>?
+    /// Loads icons for every launcher result in display order, so scrolling never waits on IconServices.
+    private(set) var iconPrefetch: Task<Void, Never>?
     private var lastVisible = false
     private var lastMode: PanelMode?
     private var lastQuery: String?
@@ -253,6 +255,7 @@ enum PanelRow {
             attributes: [.foregroundColor: Theme.secondaryText, .font: Theme.font(Theme.searchFontSize)])
         buildRows()
         tableView.reloadData()
+        prefetchIcons()
         updateSelection()
         updateFooter()
         onSizeChanged?(preferredPanelSize)
@@ -294,6 +297,25 @@ enum PanelRow {
         }
     }
 
+    /// Icons loaded ahead on open (about three screens); rows further down load as they scroll in.
+    static let iconPrefetchLimit = 24
+
+    func prefetchIcons() {
+        iconPrefetch?.cancel()
+        iconPrefetch = nil
+        let paths = results.prefix(Self.iconPrefetchLimit).compactMap { result -> String? in
+            guard case .openApp(let path) = result.action, icons.cachedIcon(forPath: path) == nil else { return nil }
+            return path
+        }
+        guard !paths.isEmpty else { return }
+        iconPrefetch = Task { [icons] in
+            for path in paths {
+                if Task.isCancelled { return }
+                _ = await icons.icon(forPath: path)
+            }
+        }
+    }
+
     /// Drops rows, preview and decoded images while hidden so idle memory falls back.
     func releaseResources() {
         rows = []
@@ -305,6 +327,8 @@ enum PanelRow {
         tableView.reloadData()
         previewTask?.cancel()
         previewTask = nil
+        iconPrefetch?.cancel()
+        iconPrefetch = nil
         preview.clear()
         thumbnails.clear()
     }
@@ -441,7 +465,16 @@ enum PanelRow {
             cell.title.stringValue = result.title
             cell.trailing.stringValue = result.typeLabel
             cell.iconSize = Theme.iconSize
-            if case .openApp(let path) = result.action { cell.iconView.image = icons.icon(forPath: path) }
+            if case .openApp(let path) = result.action {
+                cell.iconPath = path
+                cell.iconView.image = icons.cachedIcon(forPath: path)
+                if cell.iconView.image == nil {
+                    Task { [weak cell, icons] in
+                        let icon = await icons.icon(forPath: path)
+                        if let cell, cell.iconPath == path { cell.iconView.image = icon }
+                    }
+                }
+            }
             cell.needsLayout = true
             return cell
         case .clip(let entry):
@@ -449,6 +482,7 @@ enum PanelRow {
                 let c = ItemCellView(); c.identifier = .init("item"); return c
             }()
             cell.iconSize = 18
+            cell.iconPath = nil
             cell.trailing.stringValue = ""
             if entry.kind == .image {
                 cell.title.stringValue = "Image (\(entry.pixelWidth ?? 0)×\(entry.pixelHeight ?? 0))"

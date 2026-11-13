@@ -5,7 +5,7 @@ public enum Theme {
     public static let cornerRadius: CGFloat = 14
     public static let launcherWidth: CGFloat = 620
     public static let clipboardWidth: CGFloat = 760
-    public static let rowHeight: CGFloat = 36
+    public static let rowHeight: CGFloat = 40
     public static let clipRowHeight: CGFloat = 32
     public static let headerHeight: CGFloat = 26
     public static let searchHeight: CGFloat = 54
@@ -13,7 +13,7 @@ public enum Theme {
     public static let clipboardBodyHeight: CGFloat = 330
     public static let maxVisibleRows = 8
     public static let searchFontSize: CGFloat = 19
-    public static let iconSize: CGFloat = 24
+    public static let iconSize: CGFloat = 28
     public static let listInset: CGFloat = 8
 
     public static let primaryText = NSColor(white: 1, alpha: 0.92)

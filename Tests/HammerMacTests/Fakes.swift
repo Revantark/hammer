@@ -49,10 +49,11 @@ func app(_ name: String) -> AppEntry {
     AppEntry(name: name, path: "/Applications/\(name).app", bundleID: "com.test.\(name.lowercased())")
 }
 
-func solidIcon() -> NSImage {
-    let image = NSImage(size: NSSize(width: 64, height: 64))
-    image.lockFocus(); NSColor.blue.setFill(); NSRect(x: 0, y: 0, width: 64, height: 64).fill(); image.unlockFocus()
-    return image
+/// A plain square icon. Built with a drawing handler, so it is safe to make off the main thread.
+func solidIcon(size: CGFloat = 64) -> NSImage {
+    NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        NSColor.blue.setFill(); rect.fill(); return true
+    }
 }
 
 /// Everything a PanelViewController needs, wired with fakes.
@@ -64,11 +65,13 @@ func solidIcon() -> NSImage {
     let sender = FakePasteSender()
     let clock = ManualClock()
     var settings = Settings()
+    let iconLoads = LoadLog()
     let launcher: LauncherController
     let clipboard: ClipboardController
     lazy var controller: PanelViewController = {
         let vc = PanelViewController(model: model, launcher: launcher, clipboard: clipboard, pasteSender: sender,
-                                     icons: IconProvider(load: { _ in solidIcon() }), thumbnails: thumbnails,
+                                     icons: IconProvider(load: { [iconLoads] _ in iconLoads.record(); return solidIcon() }),
+                                     thumbnails: thumbnails,
                                      clock: clock, settings: { [unowned self] in self.settings })
         _ = vc.view
         return vc

@@ -50,6 +50,8 @@ final class ItemCellView: NSView {
     let title = makeLabel(Theme.font(14), Theme.primaryText)
     let trailing = makeLabel(Theme.font(12), Theme.secondaryText)
     var iconSize: CGFloat = Theme.iconSize
+    /// App the icon belongs to; a late icon load only lands if the (reused) cell still shows that app.
+    var iconPath: String?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
