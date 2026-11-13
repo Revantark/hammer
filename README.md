@@ -44,4 +44,4 @@ The check scripts run Hammer in a test mode (`HAMMER_DEBUG_SIGNALS=1`): no globa
 
 Layout: `Sources/HammerCore` (all logic, no UI, fully unit-tested with fakes), `Sources/HammerMac` (AppKit/Carbon adapters and the Frost UI), `Sources/Hammer` (app entry point), `Sources/HammerBench` (search benchmark).
 
-Measured on the owner's Mac (2026-11-13): fresh idle 7.9 MB, launcher open 17.6 MB, clipboard open with a 2560×1600 screenshot 29.1 MB, idle after use ~18–26 MB (heap memory AppKit/ImageIO don't hand back). Search < 1 ms; panel opens in ~23 ms (the first open after launch ~120 ms).
+Measured on the owner's Mac (2026-11-13): fresh idle 7.9 MB, launcher open 18 MB, clipboard open with a 2560×1600 screenshot 25.6 MB, idle after use ~18–26 MB (heap memory AppKit/ImageIO don't hand back). Search < 1 ms; launcher opens in ~28 ms, clipboard with 10 screenshots in ~29 ms (the first open after launch ~120 ms).
