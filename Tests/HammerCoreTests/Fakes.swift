@@ -44,3 +44,25 @@ func app(_ name: String, _ path: String? = nil, bundleID: String? = nil) -> AppE
     private(set) var opened: [String] = []
     func openApp(at path: String) { opened.append(path) }
 }
+
+import CoreGraphics
+import ImageIO
+import UniformTypeIdentifiers
+
+func makePNG(width: Int, height: Int) -> Data {
+    let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let image = ctx.makeImage()!
+    let data = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(dest, image, nil)
+    CGImageDestinationFinalize(dest)
+    return data as Data
+}
+
+func rep(_ type: String, _ text: String) -> Representation { Representation(type: type, data: Data(text.utf8)) }
+func textSnapshot(_ text: String, source: String? = "Notes") -> PasteboardSnapshot {
+    PasteboardSnapshot(representations: [rep(PasteboardType.plainText, text)], sourceApp: source)
+}
