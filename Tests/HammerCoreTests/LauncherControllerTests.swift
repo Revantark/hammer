@@ -27,9 +27,10 @@ import Testing
     @Test func performedAppRanksHigherNextTime() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let c = make([app("Safari"), app("Slack")], storeURL: dir.appendingPathComponent("f.json"))
-        #expect(c.results(for: "s").map(\.title) == ["Safari", "Slack"])
+        let before = c.results(for: "s").map(\.title)
+        #expect(before == ["Slack", "Safari"])  // shorter name wins with no usage
         c.perform(c.results(for: "s")[1])
-        #expect(c.results(for: "s").map(\.title) == ["Slack", "Safari"])
+        #expect(c.results(for: "s").map(\.title) == ["Safari", "Slack"])
     }
 
     @Test func usageLoadedFromStoreAtInit() throws {
