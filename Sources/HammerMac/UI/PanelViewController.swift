@@ -39,7 +39,7 @@ enum PanelRow {
     public var onVisibilityChanged: ((Bool) -> Void)?
     public var onSizeChanged: ((NSSize) -> Void)?
 
-    let searchField = NSTextField()
+    public let searchField = NSTextField()
     private let searchIcon = NSImageView()
     private let effect = NSVisualEffectView()
     private let border = PassThroughView()
@@ -230,7 +230,7 @@ enum PanelRow {
     func render() {
         if model.isVisible != lastVisible {
             lastVisible = model.isVisible
-            if model.isVisible { reloadItems() }
+            if model.isVisible { reloadItems() } else { releaseResources() }
             onVisibilityChanged?(model.isVisible)
             return
         }
@@ -291,6 +291,19 @@ enum PanelRow {
                 results.append(r)
             }
         }
+    }
+
+    /// Drops rows, preview and decoded images while hidden so idle memory falls back.
+    func releaseResources() {
+        rows = []
+        itemRows = []
+        results = []
+        clips = []
+        lastMode = nil
+        lastQuery = nil
+        tableView.reloadData()
+        preview.clear()
+        thumbnails.clear()
     }
 
     func updateSelection() {

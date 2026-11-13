@@ -91,3 +91,9 @@ func solidIcon() -> NSImage {
 
     deinit { try? FileManager.default.removeItem(at: dir) }
 }
+
+@MainActor final class FakeWatcher: DirectoryWatching {
+    private(set) var started = false
+    func start(paths: [URL], onChange: @escaping @MainActor () -> Void) { started = true }
+    func stop() { started = false }
+}
