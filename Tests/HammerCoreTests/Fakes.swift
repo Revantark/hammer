@@ -39,3 +39,8 @@ final class FakeScanner: AppScanning, @unchecked Sendable {
 func app(_ name: String, _ path: String? = nil, bundleID: String? = nil) -> AppEntry {
     AppEntry(name: name, path: path ?? "/Applications/\(name).app", bundleID: bundleID ?? "com.test.\(name.lowercased())")
 }
+
+@MainActor final class FakeAppLauncher: AppLaunching {
+    private(set) var opened: [String] = []
+    func openApp(at path: String) { opened.append(path) }
+}
