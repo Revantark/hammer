@@ -37,6 +37,33 @@ import Testing
         #expect(max(image.width, image.height) == ClipboardController.listThumbnailPixels)
     }
 
+    @Test func imageCaptureSavesPreviewSizedForThePanel() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let c = make(dir, pb)
+        pb.copy(PasteboardSnapshot(representations: [Representation(type: PasteboardType.png, data: makePNG(width: 2560, height: 1600))], sourceApp: nil))
+        c.poll()
+        let data = try #require(c.previewData(id: c.history.entries[0].id))
+        let image = try #require(ImageThumbnailer.thumbnail(data: data, maxPixelSize: 5_000))
+        #expect(image.width == ClipboardController.previewPixels && image.height == 525)
+    }
+
+    @Test func smallImagePreviewKeepsItsSize() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let c = make(dir, pb)
+        pb.copy(PasteboardSnapshot(representations: [Representation(type: PasteboardType.png, data: makePNG(width: 40, height: 20))], sourceApp: nil))
+        c.poll()
+        let data = try #require(c.previewData(id: c.history.entries[0].id))
+        let image = try #require(ImageThumbnailer.thumbnail(data: data, maxPixelSize: 5_000))
+        #expect(image.width == 40 && image.height == 20)
+    }
+
+    @Test func textCaptureHasNoPreview() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let pb = FakePasteboard(); let c = make(dir, pb)
+        pb.copy(textSnapshot("hi")); c.poll()
+        #expect(c.previewData(id: c.history.entries[0].id) == nil)
+    }
+
     @Test func textCaptureHasNoThumbnail() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let pb = FakePasteboard(); let c = make(dir, pb)

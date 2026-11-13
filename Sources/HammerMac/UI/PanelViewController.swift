@@ -15,6 +15,8 @@ public enum PanelKeyCommand: Equatable, Sendable {
 /// Supplies clipboard images: cheap list thumbnails and an async-decoded preview.
 @MainActor public protocol ThumbnailSource: AnyObject {
     func listThumbnail(for id: UUID) -> CGImage?
+    /// The big preview if it can be had in a few ms (saved preview file); nil means use `preview(for:)`.
+    func quickPreview(for id: UUID) -> CGImage?
     func preview(for id: UUID) async -> CGImage?
     func clear()
 }
@@ -57,7 +59,7 @@ enum PanelRow {
     private var clips: [ClipEntry] = []
     let preview = ClipboardPreviewView()
     private let previewDivider = NSView()
-    var previewTask: Task<Void, Never>?
+    public internal(set) var previewTask: Task<Void, Never>?
     /// Loads icons for every launcher result in display order, so scrolling never waits on IconServices.
     private(set) var iconPrefetch: Task<Void, Never>?
     private var lastVisible = false
@@ -353,6 +355,10 @@ enum PanelRow {
         case .text:
             preview.show(entry: entry, payload: clipboard.payload(id: id), image: nil, now: clock.now())
         case .image:
+            if let image = thumbnails.quickPreview(for: id) {
+                preview.show(entry: entry, payload: nil, image: image, now: clock.now())
+                return
+            }
             preview.show(entry: entry, payload: nil, image: nil, now: clock.now())
             previewTask = Task { [weak self, thumbnails] in
                 let image = await thumbnails.preview(for: id)

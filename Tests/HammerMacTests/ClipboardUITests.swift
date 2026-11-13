@@ -97,15 +97,25 @@ func pngData(width: Int, height: Int) -> Data {
         #expect(h.controller.preview.displayedText?.count == ClipboardPreviewView.textPreviewLimit)
     }
 
-    @Test func stalePreviewIgnoredAfterSelectionMoves() async {
+    @Test func stalePreviewIgnoredAfterSelectionMoves() async throws {
         let h = harness(); copyImage(h); h.pasteboard.copyText("text"); h.clipboard.poll()
+        let imageID = h.clipboard.history.entries[1].id   // saved before previews existed → full decode path
+        try FileManager.default.removeItem(at: h.dir.appendingPathComponent("clipboard/previews/\(imageID.uuidString).img"))
         h.model.hotkey(.clipboard)            // "text" selected
         h.controller.handleKey(.down)         // image selected → preview loading
-        let task = h.controller.previewTask
+        let task = try #require(h.controller.previewTask)
         h.controller.handleKey(.up)           // back to text before the image arrives
-        await task?.value
+        await task.value
         #expect(h.controller.preview.displayedImage == nil)
         #expect(h.controller.preview.displayedText == "text")
+    }
+
+    @Test func arrowingOntoImageShowsItWithoutWaiting() {
+        let h = harness(); copyImage(h, width: 2560, height: 1600); h.pasteboard.copyText("text"); h.clipboard.poll()
+        h.model.hotkey(.clipboard)            // "text" selected
+        h.controller.handleKey(.down)         // image: shown in this same step, no blank frame
+        #expect(h.controller.previewTask == nil)
+        #expect(h.controller.preview.displayedImage?.width == 840)
     }
 
     @Test func previewFollowsSelection() {
@@ -182,6 +192,29 @@ func pngData(width: Int, height: Int) -> Data {
         thumbs.clear()
         #expect(thumbs.cachedPreviewCount == 0)
         #expect(thumbs.listThumbnail(for: id) === list)
+    }
+
+    @Test func quickPreviewUsesSavedPreviewNotFullImage() throws {
+        let h = harnessWithImages(1)
+        let id = h.clipboard.history.entries[0].id
+        try FileManager.default.removeItem(at: h.dir.appendingPathComponent("clipboard/blobs/\(id.uuidString).plist"))
+        let image = try #require(ClipThumbnails(clipboard: h.clipboard).quickPreview(for: id))
+        #expect(image.width == 840 && image.height == 525)
+    }
+
+    @Test func quickPreviewNilForEntriesSavedBeforePreviews() throws {
+        let h = harnessWithImages(1)
+        let id = h.clipboard.history.entries[0].id
+        try FileManager.default.removeItem(at: h.dir.appendingPathComponent("clipboard/previews/\(id.uuidString).img"))
+        #expect(ClipThumbnails(clipboard: h.clipboard).quickPreview(for: id) == nil)
+    }
+
+    @Test func fullDecodeSavesPreviewForNextTime() async throws {
+        let h = harnessWithImages(1)
+        let id = h.clipboard.history.entries[0].id
+        try FileManager.default.removeItem(at: h.dir.appendingPathComponent("clipboard/previews/\(id.uuidString).img"))
+        _ = await ClipThumbnails(clipboard: h.clipboard).preview(for: id)
+        #expect(ClipThumbnails(clipboard: h.clipboard).quickPreview(for: id)?.width == 840)
     }
 
     @Test func textEntryHasNoThumbnail() async {

@@ -62,6 +62,24 @@ func makePNG(width: Int, height: Int) -> Data {
     return data as Data
 }
 
+/// A PNG whose pixels are see-through (alpha 0.5).
+func makeTransparentPNG(width: Int, height: Int) -> Data {
+    let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.setFillColor(CGColor(red: 0.2, green: 0.4, blue: 0.9, alpha: 0.5))
+    ctx.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let data = NSMutableData()
+    let dest = CGImageDestinationCreateWithData(data, UTType.png.identifier as CFString, 1, nil)!
+    CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
+    CGImageDestinationFinalize(dest)
+    return data as Data
+}
+
+/// The image format ImageIO detects in `data` (e.g. "public.jpeg").
+func imageType(_ data: Data) -> String? {
+    CGImageSourceCreateWithData(data as CFData, nil).flatMap { CGImageSourceGetType($0) as String? }
+}
+
 func rep(_ type: String, _ text: String) -> Representation { Representation(type: type, data: Data(text.utf8)) }
 func textSnapshot(_ text: String, source: String? = "Notes") -> PasteboardSnapshot {
     PasteboardSnapshot(representations: [rep(PasteboardType.plainText, text)], sourceApp: source)

@@ -24,6 +24,8 @@ public enum PasteOutcome: Equatable, Sendable {
     public static let pollInterval: TimeInterval = 0.25
     /// List-row thumbnail size: 18 pt at 2x.
     public static let listThumbnailPixels = 36
+    /// Saved preview size: fills the preview pane at 2x.
+    public static let previewPixels = 840
     private static let log = Logger(subsystem: "dev.hammer", category: "clipboard")
 
     private let pasteboard: PasteboardAccess
@@ -56,7 +58,7 @@ public enum PasteOutcome: Equatable, Sendable {
         case .added(let evicted):
             do {
                 try store.writePayload(candidate.representations, id: candidate.entry.id)
-                if candidate.entry.kind == .image { try writeListThumbnail(candidate) }
+                if candidate.entry.kind == .image { try writeImageThumbnails(candidate) }
             } catch {
                 Self.log.error("Writing clipboard payload failed: \(error.localizedDescription, privacy: .public)")
             }
@@ -87,9 +89,17 @@ public enum PasteOutcome: Equatable, Sendable {
         store.readThumbnail(id: id)
     }
 
-    private func writeListThumbnail(_ candidate: ClipCandidate) throws {
+    public func previewData(id: UUID) -> Data? {
+        store.readPreview(id: id)
+    }
+
+    /// Decodes the full image once: saves the panel preview, then the list thumbnail made from that preview.
+    private func writeImageThumbnails(_ candidate: ClipCandidate) throws {
         guard let image = candidate.representations.first(where: { PasteboardType.imageTypes.contains($0.type) }),
-              let thumb = ImageThumbnailer.thumbnail(data: image.data, maxPixelSize: Self.listThumbnailPixels),
+              let preview = ImageThumbnailer.thumbnail(data: image.data, maxPixelSize: Self.previewPixels),
+              let previewData = ImageThumbnailer.previewData(preview) else { return }
+        try store.writePreview(previewData, id: candidate.entry.id)
+        guard let thumb = ImageThumbnailer.thumbnail(data: previewData, maxPixelSize: Self.listThumbnailPixels),
               let png = ImageThumbnailer.pngData(thumb) else { return }
         try store.writeThumbnail(png, id: candidate.entry.id)
     }

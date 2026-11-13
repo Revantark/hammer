@@ -83,6 +83,20 @@ import Testing
         #expect(store.readThumbnail(id: orphan) == nil)
     }
 
+    @Test func previewRoundTripDeleteAndPrune() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let store = ClipStore(directory: dir)
+        let keep = UUID(), gone = UUID(), orphan = UUID()
+        for id in [keep, gone, orphan] { try store.writePreview(Data([9]), id: id) }
+        #expect(store.readPreview(id: keep) == Data([9]))
+        #expect(store.readPreview(id: UUID()) == nil)
+        store.deletePayloads([gone])
+        #expect(store.readPreview(id: gone) == nil)
+        store.pruneOrphans(keeping: [keep])
+        #expect(store.readPreview(id: keep) == Data([9]))
+        #expect(store.readPreview(id: orphan) == nil)
+    }
+
     @Test func readMissingPayloadThrows() {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         #expect(throws: (any Error).self) { try ClipStore(directory: dir).readPayload(id: UUID()) }
@@ -97,6 +111,18 @@ import Testing
 
     @Test func thumbnailOfGarbageIsNil() {
         #expect(ImageThumbnailer.thumbnail(data: Data("not an image".utf8), maxPixelSize: 600) == nil)
+    }
+
+    @Test func opaquePreviewEncodesAsJPEG() throws {
+        let image = try #require(ImageThumbnailer.thumbnail(data: makePNG(width: 100, height: 50), maxPixelSize: 840))
+        let data = try #require(ImageThumbnailer.previewData(image))
+        #expect(imageType(data) == "public.jpeg")
+    }
+
+    @Test func transparentPreviewEncodesAsPNG() throws {
+        let image = try #require(ImageThumbnailer.thumbnail(data: makeTransparentPNG(width: 100, height: 50), maxPixelSize: 840))
+        let data = try #require(ImageThumbnailer.previewData(image))
+        #expect(imageType(data) == "public.png")
     }
 
     @Test func smallImageNotUpscaled() throws {

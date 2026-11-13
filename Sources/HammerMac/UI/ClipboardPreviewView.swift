@@ -4,7 +4,7 @@ import HammerCore
 /// Right-hand preview in clipboard mode: big image or full text, details underneath.
 @MainActor public final class ClipboardPreviewView: NSView {
     public static let textPreviewLimit = 20_000
-    public static let imagePixelSize = 840
+    public static let imagePixelSize = ClipboardController.previewPixels
 
     private let imageView = NSImageView()
     private let textScroll = NSScrollView()

@@ -1,7 +1,8 @@
 import AppKit
 import HammerCore
 
-/// App icons, loaded and rendered to a small 2x bitmap off the main thread, then kept in a bounded cache.
+/// App icons, loaded and rendered to a small 2x bitmap off the main thread (one at a time: concurrent loads cost
+/// ~2 MB more memory), then kept in a bounded cache.
 /// Loading an icon the first time can take 25–130 ms (IconServices), so it must never block scrolling.
 @MainActor public final class IconProvider {
     public nonisolated static let iconPointSize: CGFloat = 28
@@ -12,7 +13,7 @@ import HammerCore
     private var cache: LRUCache<String, NSImage>
     private var inflight: [String: Task<NSImage?, Never>] = [:]
     private let load: Loader
-    private nonisolated static let queue = DispatchQueue(label: "dev.hammer.icons", qos: .userInitiated, attributes: .concurrent)
+    private nonisolated static let queue = DispatchQueue(label: "dev.hammer.icons", qos: .userInitiated)
 
     /// Default capacity fits a typical Applications folder (~9 KB per icon).
     public init(capacity: Int = 160, load: @escaping Loader = { NSWorkspace.shared.icon(forFile: $0) }) {

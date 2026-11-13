@@ -50,4 +50,9 @@ import HammerMac
     return failed ? 1 : 0
 }
 
-exit(MainActor.assumeIsolated { runBench() })
+if CommandLine.arguments.contains("clipnav") {
+    Task { @MainActor in exit(await runClipNavBench()) }
+    RunLoop.main.run()
+} else {
+    exit(MainActor.assumeIsolated { runBench() })
+}

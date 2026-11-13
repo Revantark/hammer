@@ -8,6 +8,7 @@ public final class ClipStore: @unchecked Sendable {
     private let root: URL
     private let blobs: URL
     private let thumbs: URL
+    private let previews: URL
     private var indexURL: URL { root.appendingPathComponent("index.json") }
     private let fm = FileManager.default
 
@@ -15,6 +16,7 @@ public final class ClipStore: @unchecked Sendable {
         root = directory.appendingPathComponent("clipboard", isDirectory: true)
         blobs = root.appendingPathComponent("blobs", isDirectory: true)
         thumbs = root.appendingPathComponent("thumbs", isDirectory: true)
+        previews = root.appendingPathComponent("previews", isDirectory: true)
     }
 
     /// Missing → empty. Corrupt → empty, and the bad file is renamed to `index.corrupt.json`.
@@ -53,6 +55,7 @@ public final class ClipStore: @unchecked Sendable {
         for id in ids {
             try? fm.removeItem(at: blobURL(id))
             try? fm.removeItem(at: thumbURL(id))
+            try? fm.removeItem(at: previewURL(id))
         }
     }
 
@@ -66,9 +69,20 @@ public final class ClipStore: @unchecked Sendable {
         try? Data(contentsOf: thumbURL(id))
     }
 
+    /// Panel-sized preview (JPEG, or PNG when transparent) saved at capture, so arrowing onto an image
+    /// decodes a small file instead of the full screenshot.
+    public func writePreview(_ data: Data, id: UUID) throws {
+        try fm.createDirectory(at: previews, withIntermediateDirectories: true)
+        try data.write(to: previewURL(id), options: .atomic)
+    }
+
+    public func readPreview(id: UUID) -> Data? {
+        try? Data(contentsOf: previewURL(id))
+    }
+
     /// Deletes blobs not referenced by history (recovers from crashes between blob and index writes).
     public func pruneOrphans(keeping ids: Set<UUID>) {
-        for (dir, ext) in [(blobs, "plist"), (thumbs, "png")] {
+        for (dir, ext) in [(blobs, "plist"), (thumbs, "png"), (previews, "img")] {
             let keep = Set(ids.map { "\($0.uuidString).\(ext)" })
             guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else { continue }
             for file in files where !keep.contains(file) {
@@ -79,6 +93,8 @@ public final class ClipStore: @unchecked Sendable {
 
     private func blobURL(_ id: UUID) -> URL { blobs.appendingPathComponent("\(id.uuidString).plist") }
     private func thumbURL(_ id: UUID) -> URL { thumbs.appendingPathComponent("\(id.uuidString).png") }
+    /// ".img": the format (JPEG or PNG) is detected from the bytes.
+    private func previewURL(_ id: UUID) -> URL { previews.appendingPathComponent("\(id.uuidString).img") }
 
     private func decoder() -> JSONDecoder {
         let d = JSONDecoder()
