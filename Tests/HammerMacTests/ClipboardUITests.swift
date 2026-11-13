@@ -118,6 +118,26 @@ func pngData(width: Int, height: Int) -> Data {
         #expect(h.controller.preview.displayedImage?.width == 840)
     }
 
+    func press(_ h: PanelHarness, _ selector: Selector) -> Bool {
+        h.controller.control(h.controller.searchField, textView: NSTextView(), doCommandBy: selector)
+    }
+
+    @Test func tabSelectsNextEntryShiftTabPrevious() {
+        let h = harness(["one", "two", "three"]); h.model.hotkey(.clipboard)   // newest ("three") selected
+        #expect(press(h, #selector(NSResponder.insertTab(_:))))
+        #expect(h.controller.preview.displayedText == "two")
+        #expect(press(h, #selector(NSResponder.insertTab(_:))))
+        #expect(h.controller.preview.displayedText == "one")
+        #expect(press(h, #selector(NSResponder.insertBacktab(_:))))
+        #expect(h.controller.preview.displayedText == "two")
+    }
+
+    @Test func tabInLauncherIsSwallowedAndKeepsSelection() {
+        let h = harness(); h.model.hotkey(.launcher)
+        #expect(press(h, #selector(NSResponder.insertTab(_:))))   // handled: focus stays in the search field
+        #expect(h.model.selectedIndex == 0)
+    }
+
     @Test func previewFollowsSelection() {
         let h = harness(["one", "two"]); h.model.hotkey(.clipboard)
         #expect(h.controller.preview.displayedText == "two")

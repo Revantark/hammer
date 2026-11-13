@@ -424,6 +424,9 @@ enum PanelRow {
         case #selector(NSResponder.moveDown(_:)): handleKey(.down)
         case #selector(NSResponder.insertNewline(_:)): handleKey(.enter)
         case #selector(NSResponder.cancelOperation(_:)): handleKey(.escape)
+        // Clipboard: Tab / ⇧Tab step through entries. Launcher: swallowed so focus never leaves the search field.
+        case #selector(NSResponder.insertTab(_:)): if model.mode == .clipboard { handleKey(.down) }
+        case #selector(NSResponder.insertBacktab(_:)): if model.mode == .clipboard { handleKey(.up) }
         default: return false
         }
         return true

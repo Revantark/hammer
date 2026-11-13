@@ -3,7 +3,7 @@
 A minimal macOS app launcher and clipboard manager. Swift + AppKit, no dependencies.
 
 - **⌘Space** — launcher: type, ↑/↓, Enter to open (or bring forward) an app. With an empty search, the 5 apps you opened last sit in a **Recent** section above all apps A–Z. Typing fuzzy-searches, ranked by how often and how recently you use each app.
-- **⌥X** — clipboard: the latest 25 copies (text and images), newest first, searchable. Enter pastes into the app you were in.
+- **⌥X** — clipboard: the latest 25 copies (text and images), newest first, searchable. ↑/↓ or Tab/⇧Tab to move, Enter pastes into the app you were in.
 - Both shortcuts can be changed in Settings (**⌘,** while the panel is open).
 
 ## Build and install
