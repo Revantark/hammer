@@ -1,0 +1,94 @@
+import AppKit
+import Testing
+import HammerCore
+@testable import HammerMac
+
+@MainActor @Suite struct PanelViewControllerTests {
+    @Test func launcherShowsAllAppsOnEmptyQuery() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        #expect(h.controller.displayedRowCount == 3)
+        #expect(h.controller.displayedHeaders == ["Applications"])
+    }
+
+    @Test func typingFiltersRows() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("saf")
+        #expect(h.controller.displayedRowCount == 1)
+        #expect(h.model.query == "saf")
+    }
+
+    @Test func downThenEnterLaunchesSecond() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        let second = h.launcher.results(for: "")[1]
+        h.controller.handleKey(.down)
+        h.controller.handleKey(.enter)
+        #expect(h.appLauncher.opened == [second.id])
+        #expect(!h.model.isVisible)
+    }
+
+    @Test func enterWithNoResultsDoesNothing() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("zzzz")
+        h.controller.handleKey(.enter)
+        #expect(h.appLauncher.opened.isEmpty)
+        #expect(h.model.isVisible)
+    }
+
+    @Test func escapeHides() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.controller.handleKey(.escape)
+        #expect(!h.model.isVisible)
+    }
+
+    @Test func reopeningClearsSearchField() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("saf"); h.model.hide(); h.model.hotkey(.launcher)
+        #expect(h.controller.searchField.stringValue == "")
+        #expect(h.controller.displayedRowCount == 3)
+    }
+
+    @Test func footerTextLauncher() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        #expect(h.controller.footerLeftText == "Hammer")
+    }
+
+    @Test func footerShowsCurrentHotkeys() {
+        let h = PanelHarness().start()
+        h.settings.clipboardHotkey = Hotkey(keyCode: 9, modifiers: [.control, .option])
+        h.model.hotkey(.launcher)
+        #expect(h.controller.footerRightText.contains("⌃⌥V"))
+    }
+
+    @Test func cmdCommaOpensSettings() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        var opened = 0
+        h.controller.onOpenSettings = { opened += 1 }
+        h.controller.handleKey(.openSettings)
+        #expect(opened == 1)
+    }
+
+    @Test func keyCommandMapping() {
+        func key(_ chars: String, _ flags: NSEvent.ModifierFlags) -> NSEvent {
+            NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0, windowNumber: 0,
+                             context: nil, characters: chars, charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 43)!
+        }
+        #expect(PanelKeyCommand.from(key(",", .command)) == .openSettings)
+        #expect(PanelKeyCommand.from(key(",", [])) == nil)
+    }
+
+    @Test func visibilityCallbackFires() {
+        let h = PanelHarness().start()
+        var states: [Bool] = []
+        h.controller.onVisibilityChanged = { states.append($0) }
+        h.model.hotkey(.launcher); h.model.setQuery("a"); h.model.hide()
+        #expect(states == [true, false])
+    }
+
+    @Test func launcherPanelSizeFollowsRows() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        let full = h.controller.preferredPanelSize
+        h.type("saf")
+        #expect(h.controller.preferredPanelSize.width == Theme.launcherWidth)
+        #expect(h.controller.preferredPanelSize.height < full.height)
+    }
+}

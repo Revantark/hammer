@@ -1,0 +1,356 @@
+import AppKit
+import HammerCore
+
+public enum PanelKeyCommand: Equatable, Sendable {
+    case up, down, enter, escape, openSettings
+
+    /// Maps key equivalents that reach the panel (⌘,).
+    public static func from(_ event: NSEvent) -> PanelKeyCommand? {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if flags == .command, event.charactersIgnoringModifiers == "," { return .openSettings }
+        return nil
+    }
+}
+
+/// Supplies decoded, downscaled clipboard images.
+@MainActor public protocol ThumbnailSource: AnyObject {
+    func thumbnail(for id: UUID, maxPixelSize: Int) -> CGImage?
+    func clear()
+}
+
+enum PanelRow {
+    case header(String)
+    case app(LauncherResult)
+}
+
+/// The Frost panel's content: search field, result list, footer. Driven by `PanelModel`.
+@MainActor public final class PanelViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
+    private let model: PanelModel
+    private let launcher: LauncherController
+    let clipboard: ClipboardController
+    let pasteSender: PasteSending
+    private let icons: IconProvider
+    let thumbnails: ThumbnailSource
+    let clock: HammerClock
+    private let settings: () -> Settings
+
+    public var onOpenSettings: (() -> Void)?
+    public var onVisibilityChanged: ((Bool) -> Void)?
+    public var onSizeChanged: ((NSSize) -> Void)?
+
+    let searchField = NSTextField()
+    private let searchIcon = NSImageView()
+    private let effect = NSVisualEffectView()
+    private let border = PassThroughView()
+    private let topDivider = NSView()
+    private let footer = NSView()
+    private let footerLeft = makeLabel(Theme.font(12), Theme.secondaryText)
+    private let footerRight = KeyHintsView()
+    let scrollView = NSScrollView()
+    let tableView = NSTableView()
+
+    private var rows: [PanelRow] = []
+    private var itemRows: [Int] = []          // item index → row index
+    private var results: [LauncherResult] = []
+    private var lastVisible = false
+    private var lastMode: PanelMode?
+    private var lastQuery: String?
+
+    public init(model: PanelModel, launcher: LauncherController, clipboard: ClipboardController, pasteSender: PasteSending,
+                icons: IconProvider, thumbnails: ThumbnailSource, clock: HammerClock, settings: @escaping () -> Settings) {
+        self.model = model
+        self.launcher = launcher
+        self.clipboard = clipboard
+        self.pasteSender = pasteSender
+        self.icons = icons
+        self.thumbnails = thumbnails
+        self.clock = clock
+        self.settings = settings
+        super.init(nibName: nil, bundle: nil)
+        model.onChange = { [weak self] in self?.render() }
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    // MARK: Test/inspection surface
+
+    var displayedRowCount: Int { itemRows.count }
+    var displayedHeaders: [String] { rows.compactMap { if case .header(let t) = $0 { return t } else { return nil } } }
+    var footerLeftText: String { footerLeft.stringValue }
+    var footerRightText: String { footerRight.text }
+
+    public var preferredPanelSize: NSSize {
+        let listHeight: CGFloat
+        if rows.isEmpty {
+            listHeight = Theme.rowHeight
+        } else {
+            var h: CGFloat = 0
+            var items = 0
+            for row in rows {
+                if case .header = row { h += Theme.headerHeight; continue }
+                if items == Theme.maxVisibleRows { break }
+                h += Theme.rowHeight
+                items += 1
+            }
+            listHeight = h + Theme.listInset
+        }
+        return NSSize(width: Theme.launcherWidth, height: Theme.searchHeight + 1 + listHeight + Theme.footerHeight)
+    }
+
+    // MARK: View
+
+    public override func loadView() {
+        effect.material = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state = .active
+        effect.appearance = NSAppearance(named: .darkAqua)
+        effect.maskImage = Self.roundedMask(radius: Theme.cornerRadius)
+        effect.frame = NSRect(origin: .zero, size: preferredPanelSize)
+
+        searchIcon.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 16, weight: .regular))
+        searchIcon.contentTintColor = Theme.secondaryText
+
+        searchField.isBordered = false
+        searchField.drawsBackground = false
+        searchField.focusRingType = .none
+        searchField.font = Theme.font(Theme.searchFontSize)
+        searchField.textColor = Theme.primaryText
+        searchField.cell?.usesSingleLineMode = true
+        searchField.cell?.lineBreakMode = .byClipping
+        searchField.delegate = self
+
+        topDivider.wantsLayer = true
+        topDivider.layer?.backgroundColor = Theme.divider.cgColor
+
+        let column = NSTableColumn(identifier: .init("main"))
+        tableView.addTableColumn(column)
+        tableView.headerView = nil
+        tableView.backgroundColor = .clear
+        tableView.intercellSpacing = .zero
+        tableView.selectionHighlightStyle = .none
+        tableView.focusRingType = .none
+        tableView.style = .plain
+        tableView.refusesFirstResponder = true
+        tableView.dataSource = self
+        tableView.delegate = self
+        tableView.target = self
+        tableView.action = #selector(rowClicked)
+        tableView.doubleAction = #selector(rowDoubleClicked)
+        scrollView.documentView = tableView
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+
+        footer.wantsLayer = true
+        footer.layer?.backgroundColor = Theme.footerFill.cgColor
+        let footerLine = NSView(frame: NSRect(x: 0, y: Theme.footerHeight - 1, width: 4000, height: 1))
+        footerLine.wantsLayer = true
+        footerLine.layer?.backgroundColor = Theme.divider.cgColor
+        footer.addSubview(footerLine)
+        footer.addSubview(footerLeft)
+        footer.addSubview(footerRight)
+
+        border.wantsLayer = true
+        border.layer?.borderWidth = 1
+        border.layer?.borderColor = Theme.border.cgColor
+        border.layer?.cornerRadius = Theme.cornerRadius
+
+        [searchIcon, searchField, topDivider, scrollView, footer].forEach(effect.addSubview)
+        addBodySubviews(to: effect)
+        effect.addSubview(border)
+        view = effect
+    }
+
+    public override func viewDidLayout() {
+        super.viewDidLayout()
+        let b = view.bounds
+        let searchY = b.height - Theme.searchHeight
+        searchIcon.frame = NSRect(x: 18, y: searchY + (Theme.searchHeight - 20) / 2, width: 20, height: 20)
+        let fieldHeight = searchField.intrinsicContentSize.height
+        searchField.frame = NSRect(x: 46, y: searchY + (Theme.searchHeight - fieldHeight) / 2, width: b.width - 64, height: fieldHeight)
+        topDivider.frame = NSRect(x: 0, y: searchY - 1, width: b.width, height: 1)
+        footer.frame = NSRect(x: 0, y: 0, width: b.width, height: Theme.footerHeight)
+        let lh = footerLeft.intrinsicContentSize.height
+        footerLeft.frame = NSRect(x: 14, y: (Theme.footerHeight - lh) / 2, width: 260, height: lh)
+        let rs = footerRight.fittingSize
+        footerRight.frame = NSRect(x: b.width - 14 - rs.width, y: (Theme.footerHeight - rs.height) / 2, width: rs.width, height: rs.height)
+        let body = NSRect(x: 0, y: Theme.footerHeight, width: b.width, height: max(0, searchY - 1 - Theme.footerHeight))
+        layoutBody(body)
+        border.frame = b
+    }
+
+    func layoutBody(_ body: NSRect) {
+        scrollView.frame = body.insetBy(dx: 0, dy: Theme.listInset / 2)
+        tableView.tableColumns.first?.width = scrollView.contentSize.width
+    }
+
+    func addBodySubviews(to container: NSView) {}
+
+    static func roundedMask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size: NSSize(width: edge, height: edge), flipped: false) { rect in
+            NSColor.black.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+            return true
+        }
+        image.capInsets = NSEdgeInsets(top: radius, left: radius, bottom: radius, right: radius)
+        image.resizingMode = .stretch
+        return image
+    }
+
+    // MARK: Rendering
+
+    func render() {
+        if model.isVisible != lastVisible {
+            lastVisible = model.isVisible
+            if model.isVisible { reloadItems() }
+            onVisibilityChanged?(model.isVisible)
+            return
+        }
+        guard model.isVisible else { return }
+        if model.mode != lastMode || model.query != lastQuery {
+            reloadItems()
+        } else {
+            updateSelection()
+        }
+    }
+
+    func reloadItems() {
+        _ = view
+        lastMode = model.mode
+        lastQuery = model.query
+        if searchField.stringValue != model.query { searchField.stringValue = model.query }
+        searchField.placeholderAttributedString = NSAttributedString(
+            string: model.mode == .launcher ? "Search apps…" : "Search clipboard…",
+            attributes: [.foregroundColor: Theme.secondaryText, .font: Theme.font(Theme.searchFontSize)])
+        buildRows()
+        tableView.reloadData()
+        updateSelection()
+        updateFooter()
+        onSizeChanged?(preferredPanelSize)
+        view.needsLayout = true
+    }
+
+    func buildRows() {
+        results = launcher.results(for: model.query)
+        rows = []
+        itemRows = []
+        var sections: [String] = []
+        var bySection: [String: [LauncherResult]] = [:]
+        for r in results {
+            if bySection[r.section] == nil { sections.append(r.section) }
+            bySection[r.section, default: []].append(r)
+        }
+        results = []
+        for section in sections {
+            rows.append(.header(section))
+            for r in bySection[section] ?? [] {
+                itemRows.append(rows.count)
+                rows.append(.app(r))
+                results.append(r)
+            }
+        }
+    }
+
+    func updateSelection() {
+        let selectedRow = itemRows.indices.contains(model.selectedIndex) ? itemRows[model.selectedIndex] : -1
+        tableView.enumerateAvailableRowViews { rowView, row in
+            (rowView as? SelectionRowView)?.isItemSelected = row == selectedRow
+        }
+        if selectedRow >= 0 { tableView.scrollRowToVisible(selectedRow) }
+        selectionChanged()
+    }
+
+    func selectionChanged() {}
+
+    func updateFooter() {
+        let s = settings()
+        footerLeft.stringValue = "Hammer"
+        footerRight.setHints([("Open", "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
+    }
+
+    // MARK: Input
+
+    public func handleKey(_ command: PanelKeyCommand) {
+        switch command {
+        case .up: model.moveSelection(by: -1, count: itemRows.count)
+        case .down: model.moveSelection(by: 1, count: itemRows.count)
+        case .escape: model.hide()
+        case .openSettings: onOpenSettings?()
+        case .enter: activateSelection()
+        }
+    }
+
+    func activateSelection() {
+        guard results.indices.contains(model.selectedIndex) else { return }
+        let result = results[model.selectedIndex]
+        model.hide()
+        launcher.perform(result)
+    }
+
+    public func controlTextDidChange(_ obj: Notification) {
+        model.setQuery(searchField.stringValue)
+    }
+
+    public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(NSResponder.moveUp(_:)): handleKey(.up)
+        case #selector(NSResponder.moveDown(_:)): handleKey(.down)
+        case #selector(NSResponder.insertNewline(_:)): handleKey(.enter)
+        case #selector(NSResponder.cancelOperation(_:)): handleKey(.escape)
+        default: return false
+        }
+        return true
+    }
+
+    @objc private func rowClicked() {
+        guard let item = itemRows.firstIndex(of: tableView.clickedRow) else { return }
+        model.moveSelection(by: item - model.selectedIndex, count: itemRows.count)
+    }
+
+    @objc private func rowDoubleClicked() {
+        rowClicked()
+        handleKey(.enter)
+    }
+
+    // MARK: Table
+
+    public func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+
+    public func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        if case .header = rows[row] { return Theme.headerHeight }
+        return rowHeight
+    }
+
+    var rowHeight: CGFloat { Theme.rowHeight }
+
+    public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        let view = SelectionRowView()
+        view.isItemSelected = itemRows.indices.contains(model.selectedIndex) && itemRows[model.selectedIndex] == row
+        return view
+    }
+
+    public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        switch rows[row] {
+        case .header(let title):
+            let cell = tableView.makeView(withIdentifier: .init("header"), owner: nil) as? HeaderCellView ?? {
+                let c = HeaderCellView(); c.identifier = .init("header"); return c
+            }()
+            cell.label.stringValue = title
+            return cell
+        case .app(let result):
+            let cell = tableView.makeView(withIdentifier: .init("item"), owner: nil) as? ItemCellView ?? {
+                let c = ItemCellView(); c.identifier = .init("item"); return c
+            }()
+            cell.title.stringValue = result.title
+            cell.trailing.stringValue = result.typeLabel
+            if case .openApp(let path) = result.action { cell.iconView.image = icons.icon(forPath: path) }
+            cell.needsLayout = true
+            return cell
+        }
+    }
+
+    public func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { false }
+}
