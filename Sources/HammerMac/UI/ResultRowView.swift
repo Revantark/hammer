@@ -66,7 +66,8 @@ final class ItemCellView: NSView {
         super.layout()
         let x0 = Theme.listInset + 10
         iconView.frame = NSRect(x: x0, y: (bounds.height - iconSize) / 2, width: iconSize, height: iconSize)
-        let trailingWidth = trailing.stringValue.isEmpty ? 0 : min(trailing.intrinsicContentSize.width, 160)
+        // Intrinsic width is fractional and a hair short of what the text field draws ("Applicati…"): round up, pad.
+        let trailingWidth = trailing.stringValue.isEmpty ? 0 : min(ceil(trailing.intrinsicContentSize.width) + 4, 160)
         let trailingX = bounds.width - Theme.listInset - 10 - trailingWidth
         let th = trailing.intrinsicContentSize.height
         trailing.frame = NSRect(x: trailingX, y: (bounds.height - th) / 2, width: trailingWidth, height: th)
@@ -106,6 +107,7 @@ final class KeyHintsView: NSStackView {
     private(set) var hints: [(label: String, key: String)] = []
 
     func setHints(_ hints: [(label: String, key: String)]) {
+        guard hints.map({ $0.label + "\u{0}" + $0.key }) != self.hints.map({ $0.label + "\u{0}" + $0.key }) else { return }
         self.hints = hints
         arrangedSubviews.forEach { $0.removeFromSuperview() }
         orientation = .horizontal

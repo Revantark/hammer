@@ -343,6 +343,7 @@ enum PanelRow {
         }
         if selectedRow >= 0 { tableView.scrollRowToVisible(selectedRow) }
         selectionChanged()
+        if model.mode == .launcher { updateFooter() }   // "Open" vs "Copy" follows the selected row
     }
 
     func selectionChanged() {
@@ -377,7 +378,9 @@ enum PanelRow {
             footerRight.setHints([("Paste", "↵"), ("Launcher", s.launcherHotkey.displayString)])
         } else {
             footerLeft.stringValue = "Hammer"
-            footerRight.setHints([("Open", "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
+            var enterLabel = "Open"
+            if results.indices.contains(model.selectedIndex), case .copyText = results[model.selectedIndex].action { enterLabel = "Copy" }
+            footerRight.setHints([(enterLabel, "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
         }
     }
 

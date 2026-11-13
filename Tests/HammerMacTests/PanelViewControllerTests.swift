@@ -74,6 +74,14 @@ import HammerCore
         #expect(!h.model.isVisible)
     }
 
+    @Test func footerSaysCopyWhileACalculationIsSelected() {
+        let h = PanelHarness().start(); h.model.hotkey(.launcher)
+        h.type("4/10")
+        #expect(h.controller.footerRightText.hasPrefix("Copy ↵"))
+        h.type("saf")
+        #expect(h.controller.footerRightText.hasPrefix("Open ↵"))
+    }
+
     @Test func enterWithNoResultsDoesNothing() {
         let h = PanelHarness().start(); h.model.hotkey(.launcher)
         h.type("zzzz")
@@ -138,5 +146,34 @@ import HammerCore
         h.type("saf")
         #expect(h.controller.preferredPanelSize.width == Theme.launcherWidth)
         #expect(h.controller.preferredPanelSize.height < full.height)
+    }
+}
+
+@MainActor @Suite struct ItemCellLayoutTests {
+    func laidOut(_ trailing: String, title: String = "Safari") -> ItemCellView {
+        let cell = ItemCellView(frame: NSRect(x: 0, y: 0, width: 600, height: Theme.rowHeight))
+        cell.title.stringValue = title
+        cell.trailing.stringValue = trailing
+        cell.layout()
+        return cell
+    }
+
+    func fullWidth(_ label: NSTextField) -> CGFloat {
+        ceil((label.stringValue as NSString).size(withAttributes: [.font: label.font!]).width)
+    }
+
+    @Test(arguments: ["Application", "Copy"])
+    func trailingLabelIsNeverCut(_ text: String) {
+        let cell = laidOut(text)
+        #expect(cell.trailing.frame.width >= fullWidth(cell.trailing))
+    }
+
+    @Test func reusedCellFitsItsNewLabel() {
+        let cell = laidOut("Application")
+        cell.trailing.stringValue = "Copy"
+        cell.layout()
+        cell.trailing.stringValue = "Application"
+        cell.layout()
+        #expect(cell.trailing.frame.width >= fullWidth(cell.trailing))
     }
 }
