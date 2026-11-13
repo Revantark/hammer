@@ -36,7 +36,7 @@ Hammer has no Dock icon. The menu bar icon is **off by default** because it cost
 ```bash
 swift test                 # unit tests (Swift Testing)
 scripts/test-repeat.sh 5   # whole suite 5× to catch flaky tests
-scripts/check-latency.sh   # keystroke→results p99 < 16 ms, hotkey→visible p95 < 50 ms
+scripts/check-latency.sh   # keystroke→results p99 < 16 ms, each ↓ through the clipboard p95 < 16 ms, hotkey→visible p95 < 50 ms
 scripts/check-memory.sh    # Activity Monitor "Memory": fresh idle ≤ 10 MB, open ≤ 30 MB, idle after use ≤ 30 MB
 ```
 

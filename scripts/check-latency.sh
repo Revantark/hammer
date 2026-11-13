@@ -1,8 +1,10 @@
 #!/bin/bash
-# Checks keystroke→results (HammerBench, p99 < 16 ms) and hotkey→visible panel (p95 < 50 ms).
+# Checks keystroke→results (HammerBench, p99 < 16 ms), each ↓ through the clipboard (p95 < 16 ms)
+# and hotkey→visible panel (p95 < 50 ms).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 swift run -c release HammerBench
+swift run -c release HammerBench clipnav
 
 scripts/build-app.sh >/dev/null
 BIN="$PWD/build/Hammer.app/Contents/MacOS/Hammer"
