@@ -15,6 +15,7 @@ final class SelectionRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
 }
 
+@MainActor
 func makeLabel(_ font: NSFont, _ color: NSColor) -> NSTextField {
     let label = NSTextField(labelWithString: "")
     label.font = font

@@ -1,9 +1,16 @@
 #!/bin/bash
-# Builds build/Hammer.app (release, stripped, signed with a stable identity).
+# Builds build/Hammer.app (release, tuned for this Mac's CPU, stripped, signed with a stable identity).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-swift build -c release --product Hammer
+# Tune for this Mac's CPU (e.g. "Apple M4" -> apple-m4). HAMMER_CPU overrides; HAMMER_CPU=generic builds portable.
+CPU="${HAMMER_CPU:-$(sysctl -n machdep.cpu.brand_string 2>/dev/null | sed -nE 's/^Apple (M[0-9]+).*/apple-\1/p' | tr '[:upper:]' '[:lower:]')}"
+CPU_FLAGS=()
+if [ -n "$CPU" ] && [ "$CPU" != "generic" ]; then
+    CPU_FLAGS=(-Xswiftc -target-cpu -Xswiftc "$CPU" -Xcc "-mcpu=$CPU")
+    echo "Optimizing for $CPU"
+fi
+swift build -c release --product Hammer ${CPU_FLAGS[@]+"${CPU_FLAGS[@]}"}
 APP=build/Hammer.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
