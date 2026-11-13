@@ -21,6 +21,11 @@ public struct LauncherResult: Equatable, Sendable, Identifiable {
         self.match = match
         self.action = action
     }
+
+    /// The same result shown under another section header.
+    public func inSection(_ section: String) -> LauncherResult {
+        LauncherResult(id: id, title: title, typeLabel: typeLabel, section: section, match: match, action: action)
+    }
 }
 
 /// A provider of launcher results (apps today; files, calculator, conversions later).

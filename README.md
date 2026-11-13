@@ -2,7 +2,7 @@
 
 A minimal macOS app launcher and clipboard manager. Swift + AppKit, no dependencies.
 
-- **⌘Space** — launcher: type, ↑/↓, Enter to open (or bring forward) an app. Fuzzy search, ranked by how often and how recently you use each app.
+- **⌘Space** — launcher: type, ↑/↓, Enter to open (or bring forward) an app. With an empty search, the 5 apps you opened last sit in a **Recent** section above all apps A–Z. Typing fuzzy-searches, ranked by how often and how recently you use each app.
 - **⌥X** — clipboard: the latest 25 copies (text and images), newest first, searchable. Enter pastes into the app you were in.
 - Both shortcuts can be changed in Settings (**⌘,** while the panel is open).
 
@@ -44,4 +44,4 @@ The check scripts run Hammer in a test mode (`HAMMER_DEBUG_SIGNALS=1`): no globa
 
 Layout: `Sources/HammerCore` (all logic, no UI, fully unit-tested with fakes), `Sources/HammerMac` (AppKit/Carbon adapters and the Frost UI), `Sources/Hammer` (app entry point), `Sources/HammerBench` (search benchmark).
 
-Measured on the owner's Mac (2026-11-13): fresh idle 7.9 MB, launcher open 18 MB, clipboard open with a 2560×1600 screenshot 25.6 MB, idle after use ~18–26 MB (heap memory AppKit/ImageIO don't hand back). Search < 1 ms; launcher opens in ~28 ms, clipboard with 10 screenshots in ~29 ms (the first open after launch ~120 ms).
+Measured on the owner's Mac (2026-11-13): fresh idle 7.9 MB, launcher open 18 MB, clipboard open with a 2560×1600 screenshot 24–30 MB, idle after use ~18–26 MB (heap memory AppKit/ImageIO don't hand back). Search < 1 ms; launcher opens in ~28 ms, clipboard with 10 screenshots in ~29 ms (the first open after launch ~120 ms).
