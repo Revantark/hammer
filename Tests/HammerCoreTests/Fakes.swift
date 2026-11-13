@@ -66,3 +66,31 @@ func rep(_ type: String, _ text: String) -> Representation { Representation(type
 func textSnapshot(_ text: String, source: String? = "Notes") -> PasteboardSnapshot {
     PasteboardSnapshot(representations: [rep(PasteboardType.plainText, text)], sourceApp: source)
 }
+
+@MainActor final class FakePasteboard: PasteboardAccess {
+    var changeCount = 100
+    var current = PasteboardSnapshot(representations: [], sourceApp: nil)
+    private(set) var written: [[Representation]] = []
+    func copy(_ snapshot: PasteboardSnapshot) { current = snapshot; changeCount += 1 }
+    func snapshot() -> PasteboardSnapshot { current }
+    func write(_ reps: [Representation]) -> Int {
+        written.append(reps)
+        current = PasteboardSnapshot(representations: reps, sourceApp: "Hammer")
+        changeCount += 1
+        return changeCount
+    }
+}
+
+@MainActor final class EventLog { var events: [String] = [] }
+
+@MainActor final class FakePasteSender: PasteSending {
+    var isTrusted = true
+    let log: EventLog
+    init(log: EventLog = EventLog()) { self.log = log }
+    func sendPaste() { log.events.append("paste") }
+    func requestTrust() { log.events.append("requestTrust") }
+}
+
+func blobCount(_ dir: URL) -> Int {
+    (try? FileManager.default.contentsOfDirectory(atPath: dir.appendingPathComponent("clipboard/blobs").path).count) ?? 0
+}
