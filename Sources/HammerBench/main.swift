@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import HammerCore
 import HammerMac
@@ -57,6 +58,16 @@ func worstCaseArchiveEntries(at date: Date) -> [ClipEntry] {
         let r = measure { _ = history.search(q) }
         if r.p99 >= budgetMs { failed = true }
         print(String(format: "clipboard %-7@ p99 %.3f ms  max %.3f ms", "'\(q)'" as NSString, r.p99, r.max))
+    }
+    // Commands read the real running apps and installed apps on every keystroke. Nothing is quit or trashed.
+    let running = WorkspaceRunningApps()
+    let commands = CommandRegistry([QuitAppCommand(force: true, apps: running),
+                                    UninstallCommand(catalog: catalog, runningApps: running, trash: WorkspaceTrash(), pasteboard: SystemPasteboard(pasteboard: NSPasteboard(name: .init("dev.hammer.bench"))),
+                                                     library: FileManager.default.temporaryDirectory, caskrooms: [], ownBundleID: nil)])
+    for q in ["/", "/kill z", "/uninstall", "/uninstall z"] {
+        let r = measure { _ = commands.results(for: q) }
+        if r.p99 >= budgetMs { failed = true }
+        print(String(format: "command  %-8@ p99 %.3f ms  max %.3f ms", "'\(q.prefix(8))'" as NSString, r.p99, r.max))
     }
     for q in ["8(5+3*2+(4*2 + 5 - 10)/2)", "safari"] {
         let r = measure { _ = Calculator.result(for: q) }
