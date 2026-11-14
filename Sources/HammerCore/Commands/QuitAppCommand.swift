@@ -50,7 +50,17 @@ public struct RunningApp: Equatable, Sendable {
 
     public func run(_ argument: CommandArgument) -> CommandOutcome {
         guard case .option(let option) = argument, let pid = Int32(option.id) else { return .done }
-        if force { apps.forceQuit(pid: pid) } else { apps.quit(pid: pid) }
-        return .done
+        let name = option.title
+        // The app may put up a save dialog and take focus; the panel needn't stay for that.
+        return .working(title: force ? "Force quitting \(name)…" : "Quitting \(name)…", keepsPanelOpen: false) { [apps, force] in
+            if force { apps.forceQuit(pid: pid) } else { apps.quit(pid: pid) }
+            let exited = await apps.waitForExit(pid: pid, timeout: .seconds(force ? 2 : 3))
+            switch (force, exited) {
+            case (true, true): return CommandReport(succeeded: true, title: "\(name) was force quit", lines: [])
+            case (true, false): return CommandReport(succeeded: false, title: "\(name) didn't quit", lines: ["Try /kill again in a moment."])
+            case (false, true): return CommandReport(succeeded: true, title: "\(name) quit", lines: [])
+            case (false, false): return CommandReport(succeeded: false, title: "\(name) is still open", lines: ["It may be asking you to save changes."])
+            }
+        }
     }
 }

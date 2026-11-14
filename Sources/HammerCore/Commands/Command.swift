@@ -31,12 +31,30 @@ public enum CommandArgument: Equatable, Sendable {
     case text(String)
 }
 
+/// What a command did, shown on the panel's result screen.
+public struct CommandReport: Equatable, Sendable {
+    public let succeeded: Bool
+    /// "Zed moved to the Trash".
+    public let title: String
+    /// Details under the title: sizes, what failed, what to do next.
+    public let lines: [String]
+
+    public init(succeeded: Bool, title: String, lines: [String]) {
+        self.succeeded = succeeded
+        self.title = title
+        self.lines = lines
+    }
+}
+
 /// What the panel does after a command ran.
 public enum CommandOutcome {
-    /// Finished: the panel closes.
+    /// Nothing to show: the panel closes.
     case done
     /// Show this list for the person to review; Enter confirms it.
     case confirm(Checklist)
+    /// Show `title` while `work` runs, then its report. `keepsPanelOpen`: stay up even if another window
+    /// (a password prompt) takes focus meanwhile.
+    case working(title: String, keepsPanelOpen: Bool, work: @MainActor () async -> CommandReport)
 }
 
 /// A `/name` command in the launcher.

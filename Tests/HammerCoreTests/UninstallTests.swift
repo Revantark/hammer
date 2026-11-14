@@ -198,9 +198,9 @@ import Testing
         let list = try checklist(make())
         list.toggle(at: 1)
         #expect(!list.items[1].isChecked)
-        let message = await list.confirm()
+        let report = await list.confirm()
         #expect(trash.trashed == [zedPath, library.appendingPathComponent("Caches/dev.zed.Zed").path])
-        #expect(message?.hasPrefix("Moved 2 items to the Trash") == true)
+        #expect(report == CommandReport(succeeded: true, title: "Zed moved to the Trash", lines: ["2 items"]))
     }
 
     @Test func nothingTickedDoesNothing() async throws {
@@ -227,7 +227,7 @@ import Testing
         running.apps = [RunningApp(pid: 7, name: "Zed", path: zedPath)]
         running.exitsWhenAsked = false
         let list = try checklist(make())
-        #expect(await list.confirm() == "Zed is still running. Quit it, then try again.")
+        #expect(await list.confirm() == CommandReport(succeeded: false, title: "Zed is still running", lines: ["Quit it, then try again."]))
         #expect(running.forceQuit.isEmpty)
         #expect(trash.trashed.isEmpty)
     }
@@ -237,8 +237,9 @@ import Testing
         touch("Caches/dev.zed.Zed", in: library)
         trash.failing = ["Zed.app"]
         let list = try checklist(make())
-        let message = try #require(await list.confirm())
-        #expect(message == "Moved 1 item to the Trash. Couldn't move Zed.app.")
+        let report = try #require(await list.confirm())
+        #expect(report == CommandReport(succeeded: false, title: "Couldn't move Zed to the Trash",
+                                        lines: ["1 item moved", "Couldn't move ~/Applications/Zed.app"]))
     }
 
     @Test func homebrewAppsGetTheBrewCommandInstead() async throws {
@@ -251,7 +252,8 @@ import Testing
         #expect(list.items.isEmpty)
         #expect(list.confirmLabel == "Copy Command")
         #expect(list.note == "Zed was installed with Homebrew. Uninstall it with: brew uninstall --cask --zap zed")
-        #expect(await list.confirm() == "Copied. Paste it into a terminal.")
+        #expect(await list.confirm() == CommandReport(succeeded: true, title: "Copied the Homebrew command",
+                                                      lines: ["brew uninstall --cask --zap zed", "Paste it into a terminal to uninstall Zed."]))
         #expect(pasteboard.written.last == [Representation(type: PasteboardType.plainText, data: Data("brew uninstall --cask --zap zed".utf8))])
         #expect(trash.trashed.isEmpty)
     }
@@ -270,5 +272,29 @@ import Testing
         #expect(changes > 0)
         list.toggle(at: 0)
         #expect(list.checkedBytes < 80_000)
+    }
+}
+
+@Suite struct UninstallReportTests {
+    func item(_ title: String, _ bytes: Int64? = nil) -> ChecklistItem { ChecklistItem(path: title, title: title, bytes: bytes) }
+
+    @Test func everythingMovedNamesTheApp() {
+        let r = UninstallCommand.report(appName: "Zed", appPath: "/A/Zed.app",
+                                        moved: [item("/A/Zed.app", 400_000_000), item("~/Library/Caches/Zed", 10_000_000)], failed: [])
+        #expect(r == CommandReport(succeeded: true, title: "Zed moved to the Trash", lines: ["2 items · 410 MB"]))
+    }
+
+    @Test func onlyLeftoversMoved() {
+        let r = UninstallCommand.report(appName: "Zed", appPath: "/A/Zed.app", moved: [item("~/Library/Caches/Zed")], failed: [])
+        #expect(r == CommandReport(succeeded: true, title: "Zed's files moved to the Trash", lines: ["1 item"]))
+    }
+
+    @Test func someLeftoversFailed() {
+        let r = UninstallCommand.report(appName: "Zed", appPath: "/A/Zed.app", moved: [item("/A/Zed.app")],
+                                        failed: (1...5).map { item("~/Library/Containers/x\($0)") })
+        #expect(r.succeeded == false)
+        #expect(r.title == "Zed moved to the Trash")
+        #expect(r.lines == ["1 item moved", "Couldn't move ~/Library/Containers/x1", "Couldn't move ~/Library/Containers/x2",
+                            "Couldn't move ~/Library/Containers/x3", "Couldn't move 2 more"])
     }
 }

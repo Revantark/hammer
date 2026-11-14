@@ -22,17 +22,20 @@ public struct ChecklistItem: Equatable, Sendable {
     /// One line above the list (the app is running, it came from Homebrew).
     public let note: String?
     public let confirmLabel: String
+    /// Shown while the confirm action runs.
+    public let workingTitle: String
     public private(set) var items: [ChecklistItem]
     public private(set) var isWorking = false
     public var onChange: (() -> Void)?
 
     private let sizer: @Sendable (String) -> Int64
-    private let perform: @MainActor ([ChecklistItem]) async -> String
+    private let perform: @MainActor ([ChecklistItem]) async -> CommandReport
 
-    public init(title: String, note: String?, confirmLabel: String, items: [ChecklistItem],
+    public init(title: String, note: String?, confirmLabel: String, workingTitle: String = "Working…", items: [ChecklistItem],
                 sizer: @escaping @Sendable (String) -> Int64 = { DiskUsage.bytes(at: URL(fileURLWithPath: $0)) },
-                perform: @escaping @MainActor ([ChecklistItem]) async -> String) {
+                perform: @escaping @MainActor ([ChecklistItem]) async -> CommandReport) {
         self.title = title
+        self.workingTitle = workingTitle
         self.note = note
         self.confirmLabel = confirmLabel
         self.items = items
@@ -60,15 +63,15 @@ public struct ChecklistItem: Equatable, Sendable {
         }
     }
 
-    /// Runs the action and returns what to tell the person. Nil when nothing is ticked or it's already running.
-    public func confirm() async -> String? {
+    /// Runs the action and returns its report. Nil when nothing is ticked or it's already running.
+    public func confirm() async -> CommandReport? {
         guard !isWorking, items.isEmpty || !checkedItems.isEmpty else { return nil }
         isWorking = true
         onChange?()
-        let message = await perform(checkedItems)
+        let report = await perform(checkedItems)
         isWorking = false
         onChange?()
-        return message
+        return report
     }
 }
 

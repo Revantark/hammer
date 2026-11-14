@@ -26,28 +26,44 @@ import Testing
                                    CommandOption(id: "202", title: "Ghostty", iconPath: "/Applications/Ghostty.app")])
     }
 
-    @Test func killForceQuits() {
+    func work(_ outcome: CommandOutcome) async throws -> (title: String, keepsOpen: Bool, report: CommandReport) {
+        guard case .working(let title, let keepsOpen, let work) = outcome else { throw CancellationError() }
+        return (title, keepsOpen, await work())
+    }
+
+    @Test func killForceQuitsAndReports() async throws {
         let kill = QuitAppCommand(force: true, apps: running)
         #expect(kill.name == "kill")
         #expect(kill.actionLabel == "Force Quit")
-        _ = kill.run(.option(kill.options()[0]))
+        let result = try await work(kill.run(.option(kill.options()[0])))
+        #expect(result.title == "Force quitting Zed…")
+        #expect(!result.keepsOpen)
+        #expect(result.report == CommandReport(succeeded: true, title: "Zed was force quit", lines: []))
         #expect(running.forceQuit == [101])
         #expect(running.quit.isEmpty)
     }
 
-    @Test func quitAsksNicely() {
+    @Test func quitAsksNicelyAndReports() async throws {
         let quit = QuitAppCommand(force: false, apps: running)
         #expect(quit.name == "quit")
         #expect(quit.actionLabel == "Quit")
-        _ = quit.run(.option(quit.options()[1]))
+        let result = try await work(quit.run(.option(quit.options()[1])))
+        #expect(result.title == "Quitting Ghostty…")
+        #expect(result.report == CommandReport(succeeded: true, title: "Ghostty quit", lines: []))
         #expect(running.quit == [202])
         #expect(running.forceQuit.isEmpty)
     }
 
+    @Test func appThatStaysOpenIsReported() async throws {
+        running.exitsWhenAsked = false
+        let quit = QuitAppCommand(force: false, apps: running)
+        let result = try await work(quit.run(.option(quit.options()[0])))
+        #expect(result.report == CommandReport(succeeded: false, title: "Zed is still open", lines: ["It may be asking you to save changes."]))
+    }
+
     @Test func runWithoutAnAppDoesNothing() {
         let kill = QuitAppCommand(force: true, apps: running)
-        _ = kill.run(.none)
-        _ = kill.run(.text("zed"))
+        guard case .done = kill.run(.none), case .done = kill.run(.text("zed")) else { Issue.record("should do nothing"); return }
         #expect(running.forceQuit.isEmpty)
     }
 

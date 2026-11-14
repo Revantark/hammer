@@ -29,9 +29,19 @@ enum PanelRow {
     case header(String)
     case app(LauncherResult)
     case clip(ClipEntry)
-    /// A command's checklist: one line of context, then the items (index into `Checklist.items`).
+    /// A command's screens: a line of context or detail, checklist items (index into `Checklist.items`), a result's title.
     case note(String)
     case check(Int)
+    case report(CommandReport)
+}
+
+/// What the panel shows once a command has locked onto its target.
+enum CommandScreen {
+    /// Review before acting (uninstall). Esc goes back to the list.
+    case checklist(Checklist)
+    case working(String)
+    /// What happened. Enter opens the plain launcher, Esc closes.
+    case report(CommandReport)
 }
 
 /// The Frost panel's content: search field, result list, footer. Driven by `PanelModel`.
@@ -73,14 +83,24 @@ enum PanelRow {
     private var lastMode: PanelMode?
     private var lastQuery: String?
 
-    /// A command's review list (uninstall), shown instead of results until confirmed, Esc, or typing.
-    private(set) var checklist: Checklist?
-    private var checklistCommand: String?
+    /// Set once a command row is chosen: the search field is locked to `lockTitle` and keys drive the screen.
+    private(set) var screen: CommandScreen?
+    private var lockTitle = ""
+    /// Bumped whenever the screen is left, so late results from abandoned work are dropped.
+    private var screenGeneration = 0
     private(set) var checklistSizes: Task<Void, Never>?
-    /// The confirm action; keeps running if the panel closes meanwhile.
-    private(set) var checklistTask: Task<Void, Never>?
-    /// What the last command did; shown in the footer until the query changes.
-    private var statusMessage: String?
+    /// The command's work; keeps running if the panel closes meanwhile.
+    private(set) var commandTask: Task<Void, Never>?
+    /// True while work that may raise a password prompt runs: losing focus mustn't close the panel.
+    public private(set) var holdsPanelOpen = false
+    /// Asks for keyboard focus back after work that let another window (a password prompt) take it.
+    public var onNeedsFocus: (() -> Void)?
+
+    var checklist: Checklist? {
+        if case .checklist(let list) = screen { return list }
+        return nil
+    }
+
 
     public init(model: PanelModel, launcher: LauncherController, clipboard: ClipboardController, pasteSender: PasteSending,
                 icons: IconProvider, thumbnails: ThumbnailSource, clock: HammerClock, settings: @escaping () -> Settings) {
@@ -267,7 +287,7 @@ enum PanelRow {
         _ = view
         lastMode = model.mode
         lastQuery = model.query
-        if searchField.stringValue != model.query {
+        if screen == nil, searchField.stringValue != model.query {
             searchField.stringValue = model.query
             // Filled in by Tab/Enter on a command: keep typing after it.
             searchField.currentEditor()?.selectedRange = NSRange(location: (model.query as NSString).length, length: 0)
@@ -289,12 +309,20 @@ enum PanelRow {
         itemRows = []
         results = []
         clips = []
-        if model.mode == .launcher, let checklist {
-            rows.append(.header(checklist.title))
-            if let note = checklist.note { rows.append(.note(note)) }
-            for index in checklist.items.indices {
-                itemRows.append(rows.count)
-                rows.append(.check(index))
+        if model.mode == .launcher, let screen {
+            switch screen {
+            case .checklist(let list):
+                rows.append(.header(list.title))
+                if let note = list.note { rows.append(.note(note)) }
+                for index in list.items.indices {
+                    itemRows.append(rows.count)
+                    rows.append(.check(index))
+                }
+            case .working(let title):
+                rows.append(.note(title))
+            case .report(let report):
+                rows.append(.report(report))
+                rows += report.lines.map { .note($0) }
             }
             return
         }
@@ -353,8 +381,7 @@ enum PanelRow {
         itemRows = []
         results = []
         clips = []
-        closeChecklist(reload: false)
-        statusMessage = nil
+        leaveScreen()
         lastMode = nil
         lastQuery = nil
         tableView.reloadData()
@@ -407,19 +434,23 @@ enum PanelRow {
             let n = clipboard.history.entries.count
             footerLeft.stringValue = "Clipboard · \(n) \(n == 1 ? "item" : "items")"
             footerRight.setHints([("Paste", "↵"), ("Launcher", s.launcherHotkey.displayString)])
-        } else if let checklist {
-            if checklist.isWorking {
-                footerLeft.stringValue = "Working…"
-            } else if checklist.items.isEmpty {
-                footerLeft.stringValue = ""
-            } else {
-                let bytes = checklist.checkedBytes
-                footerLeft.stringValue = "\(checklist.checkedItems.count) selected" + (bytes > 0 ? " · " + Self.size(bytes) : "")
+        } else if let screen {
+            footerLeft.stringValue = ""
+            switch screen {
+            case .checklist(let list):
+                if !list.items.isEmpty {
+                    let bytes = list.checkedBytes
+                    footerLeft.stringValue = "\(list.checkedItems.count) selected" + (bytes > 0 ? " · " + Self.size(bytes) : "")
+                }
+                footerRight.setHints(list.items.isEmpty ? [(list.confirmLabel, "↵"), ("Back", "esc")]
+                                                        : [(list.confirmLabel, "↵"), ("Toggle", "Space"), ("Back", "esc")])
+            case .working:
+                footerRight.setHints([("Close", "esc")])
+            case .report:
+                footerRight.setHints([("Open Launcher", "↵"), ("Close", "esc")])
             }
-            footerRight.setHints(checklist.items.isEmpty ? [(checklist.confirmLabel, "↵"), ("Back", "esc")]
-                                                         : [(checklist.confirmLabel, "↵"), ("Toggle", "Space"), ("Back", "esc")])
         } else {
-            footerLeft.stringValue = statusMessage ?? "Hammer"
+            footerLeft.stringValue = "Hammer"
             let enterLabel = results.indices.contains(model.selectedIndex) ? Self.enterLabel(for: results[model.selectedIndex]) : "Open"
             footerRight.setHints([(enterLabel, "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
         }
@@ -456,23 +487,34 @@ enum PanelRow {
 
     // MARK: Input
 
-    /// Keys the panel sees before the search field: Space ticks checklist items instead of typing.
+    /// Keys the panel sees before the search field. While a command screen is up, every key drives the screen and
+    /// nothing reaches the (locked) field; ⌘ shortcuts still pass through (⌘, opens Settings).
     public func handleKeyDown(_ event: NSEvent) -> Bool {
-        guard checklist != nil, model.isVisible, event.charactersIgnoringModifiers == " ",
-              event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
-        handleKey(.toggle)
+        guard screen != nil, model.isVisible, !event.modifierFlags.contains(.command) else { return false }
+        switch event.keyCode {
+        case 36, 76: handleKey(.enter)      // Return, keypad Enter
+        case 53: handleKey(.escape)
+        case 125: handleKey(.down)
+        case 126: handleKey(.up)
+        case 49: handleKey(.toggle)         // Space
+        default: break                      // typing does nothing while locked
+        }
         return true
     }
 
     public func handleKey(_ command: PanelKeyCommand) {
-        if let checklist, model.mode == .launcher {
-            switch command {
-            case .up, .down, .openSettings: break
-            case .escape: closeChecklist(reload: true); return
-            case .enter: confirm(checklist); return
-            case .toggle: checklist.toggle(at: model.selectedIndex); return
-            case .tab: return
+        if let screen, model.mode == .launcher {
+            switch (screen, command) {
+            case (_, .openSettings): onOpenSettings?()
+            case (.checklist, .up), (.checklist, .down): model.moveSelection(by: command == .up ? -1 : 1, count: itemRows.count)
+            case (.checklist, .escape): leaveScreen(); reloadItems()
+            case (.checklist(let list), .enter): confirm(list)
+            case (.checklist(let list), .toggle): list.toggle(at: model.selectedIndex)
+            case (.report, .enter): openLauncher()
+            case (.working, .escape), (.report, .escape): model.hide()
+            default: break
             }
+            return
         }
         switch command {
         case .up: model.moveSelection(by: -1, count: itemRows.count)
@@ -502,9 +544,13 @@ enum PanelRow {
         case .completeCommand(let name):
             model.setQuery("/\(name) ")
         case .runCommand(let name, let argument):
+            let title = argument == .none ? result.title : "\(result.typeLabel) \(result.title)"   // "Uninstall Zed"
             switch launcher.runCommand(name: name, argument: argument) {
             case .done, nil: model.hide()
-            case .confirm(let list): show(list, command: name)
+            case .confirm(let list): showChecklist(list, lockTitle: title)
+            case .working(let workingTitle, let keepsOpen, let work):
+                lock(title)
+                run(work, title: workingTitle, keepsPanelOpen: keepsOpen)
             }
         case .openApp, .copyText:
             model.hide()
@@ -513,48 +559,86 @@ enum PanelRow {
     }
 
     public func controlTextDidChange(_ obj: Notification) {
-        closeChecklist(reload: false)
-        statusMessage = nil
+        guard screen == nil else { return }
         model.setQuery(searchField.stringValue)
     }
 
-    // MARK: Checklist
+    // MARK: Command screens
 
-    func show(_ list: Checklist, command: String) {
-        checklist = list
-        checklistCommand = command
+    private func lock(_ title: String) {
+        lockTitle = title
+        searchField.abortEditing()
+        searchField.isEditable = false
+        searchField.isSelectable = false
+        searchField.textColor = Theme.secondaryText
+        searchField.stringValue = title
+    }
+
+    private func setScreen(_ new: CommandScreen) {
+        screen = new
+        reloadItems()
+        model.moveSelection(by: -model.selectedIndex, count: itemRows.count)
+    }
+
+    private func showChecklist(_ list: Checklist, lockTitle title: String) {
+        lock(title)
         list.onChange = { [weak self, weak list] in
             guard let self, let list, self.checklist === list else { return }
             self.tableView.reloadData()
             self.updateSelection()
         }
-        reloadItems()
-        model.moveSelection(by: -model.selectedIndex, count: itemRows.count)
+        setScreen(.checklist(list))
         checklistSizes = Task { await list.loadSizes() }
     }
 
-    func closeChecklist(reload: Bool) {
-        guard checklist != nil else { return }
-        checklist?.onChange = nil
-        checklist = nil
-        checklistCommand = nil
-        checklistSizes?.cancel()
-        checklistSizes = nil
-        if reload { reloadItems() }
+    private func confirm(_ list: Checklist) {
+        guard list.items.isEmpty || !list.checkedItems.isEmpty else { return }
+        run({ await list.confirm() ?? CommandReport(succeeded: false, title: "Nothing to do", lines: []) },
+            title: list.workingTitle, keepsPanelOpen: true)
     }
 
-    private func confirm(_ list: Checklist) {
-        guard !list.isWorking, checklistTask == nil else { return }
-        let command = checklistCommand
-        checklistTask = Task { [weak self] in
-            let message = await list.confirm()
+    private func run(_ work: @escaping @MainActor () async -> CommandReport, title: String, keepsPanelOpen: Bool) {
+        guard commandTask == nil else { return }
+        checklistSizes?.cancel()
+        checklistSizes = nil
+        holdsPanelOpen = keepsPanelOpen
+        setScreen(.working(title))
+        let generation = screenGeneration
+        commandTask = Task { [weak self] in
+            let report = await work()
             guard let self else { return }
-            self.checklistTask = nil
-            guard let message, self.checklist === list else { return }
-            self.closeChecklist(reload: false)
-            self.statusMessage = message
-            if let command { self.model.setQuery("/\(command) ") } else { self.reloadItems() }
+            self.commandTask = nil
+            guard self.screenGeneration == generation, self.model.isVisible else { return }
+            self.holdsPanelOpen = false
+            self.setScreen(.report(report))
+            if keepsPanelOpen { self.onNeedsFocus?() }
         }
+    }
+
+    /// Back to normal searching; the field shows the query again.
+    private func leaveScreen() {
+        guard screen != nil else { return }
+        checklist?.onChange = nil
+        screen = nil
+        screenGeneration += 1
+        holdsPanelOpen = false
+        checklistSizes?.cancel()
+        checklistSizes = nil
+        searchField.isEditable = true
+        searchField.isSelectable = true
+        searchField.textColor = Theme.primaryText
+        searchField.stringValue = model.query
+        if let window = view.window, model.isVisible {
+            window.makeFirstResponder(searchField)
+            searchField.currentEditor()?.selectedRange = NSRange(location: (model.query as NSString).length, length: 0)
+        }
+    }
+
+    /// The result screen's Enter: the plain launcher with every app.
+    private func openLauncher() {
+        model.setQuery("")
+        leaveScreen()
+        reloadItems()
     }
 
     static func size(_ bytes: Int64) -> String {
@@ -578,11 +662,11 @@ enum PanelRow {
     @objc private func rowClicked() {
         guard let item = itemRows.firstIndex(of: tableView.clickedRow) else { return }
         model.moveSelection(by: item - model.selectedIndex, count: itemRows.count)
-        if checklist != nil { handleKey(.toggle) }   // a click ticks; only Enter confirms
+        if case .checklist = screen { handleKey(.toggle) }   // a click ticks; only Enter confirms
     }
 
     @objc private func rowDoubleClicked() {
-        guard checklist == nil else { return }
+        guard screen == nil else { return }
         rowClicked()
         handleKey(.enter)
     }
@@ -614,6 +698,17 @@ enum PanelRow {
             cell.iconPath = nil
             cell.iconView.image = Self.noteGlyph
             cell.title.stringValue = text
+            cell.trailing.stringValue = ""
+            cell.needsLayout = true
+            return cell
+        case .report(let report):
+            let cell = tableView.makeView(withIdentifier: .init("report"), owner: nil) as? ItemCellView ?? {
+                let c = ItemCellView(); c.identifier = .init("report"); c.title.font = Theme.font(15, .semibold); return c
+            }()
+            cell.iconSize = 22
+            cell.iconPath = nil
+            cell.iconView.image = report.succeeded ? Self.successGlyph : Self.failureGlyph
+            cell.title.stringValue = report.title
             cell.trailing.stringValue = ""
             cell.needsLayout = true
             return cell
@@ -687,10 +782,12 @@ enum PanelRow {
     static let checkedGlyph = symbol("checkmark.square.fill", tint: .white, .controlAccentColor)
     static let uncheckedGlyph = symbol("square", tint: Theme.secondaryText)
     static let noteGlyph = symbol("info.circle", tint: Theme.secondaryText)
+    static let successGlyph = symbol("checkmark.circle.fill", size: 20, tint: .white, .systemGreen)
+    static let failureGlyph = symbol("xmark.circle.fill", size: 20, tint: .white, .systemRed)
 
     /// `tint`: one color per symbol layer (checkmark, then box).
-    private static func symbol(_ name: String, tint: NSColor...) -> NSImage {
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(.init(paletteColors: tint))
+    private static func symbol(_ name: String, size: CGFloat = 14, tint: NSColor...) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: size, weight: .regular).applying(.init(paletteColors: tint))
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) ?? NSImage()
     }
 

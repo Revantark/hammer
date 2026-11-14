@@ -48,7 +48,8 @@ import Foundation
             return .confirm(Checklist(title: "Uninstall \(app.name)", note: "\(app.name) was installed with Homebrew. Uninstall it with: \(command)",
                                       confirmLabel: "Copy Command", items: []) { [pasteboard] _ in
                 _ = pasteboard.write([Representation(type: PasteboardType.plainText, data: Data(command.utf8))])
-                return "Copied. Paste it into a terminal."
+                return CommandReport(succeeded: true, title: "Copied the Homebrew command",
+                                     lines: [command, "Paste it into a terminal to uninstall \(app.name)."])
             })
         }
         let home = library.deletingLastPathComponent().path
@@ -56,17 +57,17 @@ import Foundation
         let items = paths.map { ChecklistItem(path: $0, title: $0.hasPrefix(home + "/") ? "~" + $0.dropFirst(home.count) : $0) }
         let isRunning = runningApps.runningApps().contains { $0.path == app.path }
         return .confirm(Checklist(title: "Uninstall \(app.name)", note: isRunning ? "\(app.name) is running. Hammer will ask it to quit first." : nil,
-                                  confirmLabel: "Move to Trash", items: items) { checked in
+                                  confirmLabel: "Move to Trash", workingTitle: "Moving to the Trash…", items: items) { checked in
             await self.uninstall(app, items: checked)   // strong: the list must work even if the command goes away; no cycle
         })
     }
 
-    private func uninstall(_ app: AppEntry, items: [ChecklistItem]) async -> String {
+    private func uninstall(_ app: AppEntry, items: [ChecklistItem]) async -> CommandReport {
         // Quit first even when only leftovers are ticked: an app rewrites its files while it runs.
         for running in runningApps.runningApps() where running.path == app.path {
             runningApps.quit(pid: running.pid)
             guard await runningApps.waitForExit(pid: running.pid, timeout: .seconds(5)) else {
-                return "\(app.name) is still running. Quit it, then try again."
+                return CommandReport(succeeded: false, title: "\(app.name) is still running", lines: ["Quit it, then try again."])
             }
         }
         var moved: [ChecklistItem] = []
@@ -80,21 +81,31 @@ import Foundation
             }
         }
         if moved.contains(where: { $0.path == app.path }) { catalog.reload() }   // drop it from the list now, not when FSEvents notices
-        return Self.summary(moved: moved, failed: failed)
+        return Self.report(appName: app.name, appPath: app.path, moved: moved, failed: failed)
     }
 
-    static func summary(moved: [ChecklistItem], failed: [ChecklistItem]) -> String {
-        var parts: [String] = []
+    nonisolated static func report(appName: String, appPath: String, moved: [ChecklistItem], failed: [ChecklistItem]) -> CommandReport {
+        let title: String
+        if failed.contains(where: { $0.path == appPath }) {
+            title = "Couldn't move \(appName) to the Trash"
+        } else if moved.contains(where: { $0.path == appPath }) {
+            title = "\(appName) moved to the Trash"
+        } else if moved.isEmpty {
+            title = "Couldn't move \(appName)'s files to the Trash"
+        } else {
+            title = "\(appName)'s files moved to the Trash"
+        }
+        var lines: [String] = []
         if !moved.isEmpty {
             let bytes = moved.reduce(Int64(0)) { $0 + ($1.bytes ?? 0) }
-            let size = bytes > 0 ? " (\(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)))" : ""
-            parts.append("Moved \(moved.count) \(moved.count == 1 ? "item" : "items") to the Trash\(size).")
+            var line = "\(moved.count) \(moved.count == 1 ? "item" : "items")" + (failed.isEmpty ? "" : " moved")
+            if bytes > 0 { line += " · " + ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file) }
+            lines.append(line)
         }
-        if let first = failed.first {
-            let name = URL(fileURLWithPath: first.path).lastPathComponent
-            parts.append(failed.count == 1 ? "Couldn't move \(name)." : "Couldn't move \(name) and \(failed.count - 1) more.")
-        }
-        return parts.joined(separator: " ")
+        let shown = 3
+        lines += failed.prefix(shown).map { "Couldn't move \($0.title)" }
+        if failed.count > shown { lines.append("Couldn't move \(failed.count - shown) more") }
+        return CommandReport(succeeded: failed.isEmpty, title: title, lines: lines)
     }
 }
 

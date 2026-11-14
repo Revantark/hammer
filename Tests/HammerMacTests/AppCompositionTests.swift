@@ -14,13 +14,14 @@ import HammerCore
 
     let running = FakeRunningApps([RunningApp(pid: 42, name: "Zed", path: "/Applications/Zed.app")])
 
-    @Test func launcherHasKillQuitAndUninstallCommands() throws {
+    @Test func launcherHasKillQuitAndUninstallCommands() async throws {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let c = make(dir)
         #expect(c.launcher.results(for: "/").map(\.title) == ["/kill", "/quit", "/uninstall"])
         let row = try #require(c.launcher.results(for: "/kill zed").first)
         guard case .runCommand(let name, let argument) = row.action else { Issue.record("not a command"); return }
-        _ = c.launcher.runCommand(name: name, argument: argument)
+        guard case .working(_, _, let work) = c.launcher.runCommand(name: name, argument: argument) else { Issue.record("no work"); return }
+        #expect(await work().succeeded)
         #expect(running.forceQuit == [42])
     }
 

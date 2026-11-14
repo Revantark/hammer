@@ -73,7 +73,15 @@ import os
         controller.onVisibilityChanged = { [weak self] visible in visible ? self?.showPanel() : self?.hidePanel() }
         controller.onSizeChanged = { [weak self] size in self?.resizePanel(to: size) }
         controller.onOpenSettings = { [weak self] in self?.openSettings() }
-        panel.onResignKey = { [weak self] in self?.composition.model.hide() }
+        panel.onResignKey = { [weak self, weak controller] in
+            // Uninstalling a root-owned app raises Finder's password prompt; the result must still show afterwards.
+            if controller?.holdsPanelOpen == true { return }
+            self?.composition.model.hide()
+        }
+        controller.onNeedsFocus = { [weak panel] in
+            guard let panel, panel.isVisible, !panel.isKeyWindow else { return }
+            panel.makeKeyAndOrderFront(nil)
+        }
         panel.onKeyEquivalent = { [weak controller] event in
             guard let command = PanelKeyCommand.from(event) else { return false }
             controller?.handleKey(command)
