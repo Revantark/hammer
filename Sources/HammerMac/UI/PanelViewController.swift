@@ -5,6 +5,8 @@ public enum PanelKeyCommand: Equatable, Sendable {
     case up, down, enter, escape, openSettings
     /// Clipboard: next entry. Launcher: fills in the selected "/command ".
     case tab
+    /// Space in a checklist: ticks or unticks the selected item.
+    case toggle
 
     /// Maps key equivalents that reach the panel (⌘,).
     public static func from(_ event: NSEvent) -> PanelKeyCommand? {
@@ -27,6 +29,9 @@ enum PanelRow {
     case header(String)
     case app(LauncherResult)
     case clip(ClipEntry)
+    /// A command's checklist: one line of context, then the items (index into `Checklist.items`).
+    case note(String)
+    case check(Int)
 }
 
 /// The Frost panel's content: search field, result list, footer. Driven by `PanelModel`.
@@ -67,6 +72,15 @@ enum PanelRow {
     private var lastVisible = false
     private var lastMode: PanelMode?
     private var lastQuery: String?
+
+    /// A command's review list (uninstall), shown instead of results until confirmed, Esc, or typing.
+    private(set) var checklist: Checklist?
+    private var checklistCommand: String?
+    private(set) var checklistSizes: Task<Void, Never>?
+    /// The confirm action; keeps running if the panel closes meanwhile.
+    private(set) var checklistTask: Task<Void, Never>?
+    /// What the last command did; shown in the footer until the query changes.
+    private var statusMessage: String?
 
     public init(model: PanelModel, launcher: LauncherController, clipboard: ClipboardController, pasteSender: PasteSending,
                 icons: IconProvider, thumbnails: ThumbnailSource, clock: HammerClock, settings: @escaping () -> Settings) {
@@ -275,6 +289,15 @@ enum PanelRow {
         itemRows = []
         results = []
         clips = []
+        if model.mode == .launcher, let checklist {
+            rows.append(.header(checklist.title))
+            if let note = checklist.note { rows.append(.note(note)) }
+            for index in checklist.items.indices {
+                itemRows.append(rows.count)
+                rows.append(.check(index))
+            }
+            return
+        }
         if model.mode == .clipboard {
             let matches = clipboard.search(model.query)
             for section in ClipHistory.sections(matches, now: clock.now(), calendar: .current, locale: .current) {
@@ -330,6 +353,8 @@ enum PanelRow {
         itemRows = []
         results = []
         clips = []
+        closeChecklist(reload: false)
+        statusMessage = nil
         lastMode = nil
         lastQuery = nil
         tableView.reloadData()
@@ -382,8 +407,19 @@ enum PanelRow {
             let n = clipboard.history.entries.count
             footerLeft.stringValue = "Clipboard · \(n) \(n == 1 ? "item" : "items")"
             footerRight.setHints([("Paste", "↵"), ("Launcher", s.launcherHotkey.displayString)])
+        } else if let checklist {
+            if checklist.isWorking {
+                footerLeft.stringValue = "Working…"
+            } else if checklist.items.isEmpty {
+                footerLeft.stringValue = ""
+            } else {
+                let bytes = checklist.checkedBytes
+                footerLeft.stringValue = "\(checklist.checkedItems.count) selected" + (bytes > 0 ? " · " + Self.size(bytes) : "")
+            }
+            footerRight.setHints(checklist.items.isEmpty ? [(checklist.confirmLabel, "↵"), ("Back", "esc")]
+                                                         : [(checklist.confirmLabel, "↵"), ("Toggle", "Space"), ("Back", "esc")])
         } else {
-            footerLeft.stringValue = "Hammer"
+            footerLeft.stringValue = statusMessage ?? "Hammer"
             let enterLabel = results.indices.contains(model.selectedIndex) ? Self.enterLabel(for: results[model.selectedIndex]) : "Open"
             footerRight.setHints([(enterLabel, "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
         }
@@ -420,13 +456,31 @@ enum PanelRow {
 
     // MARK: Input
 
+    /// Keys the panel sees before the search field: Space ticks checklist items instead of typing.
+    public func handleKeyDown(_ event: NSEvent) -> Bool {
+        guard checklist != nil, model.isVisible, event.charactersIgnoringModifiers == " ",
+              event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
+        handleKey(.toggle)
+        return true
+    }
+
     public func handleKey(_ command: PanelKeyCommand) {
+        if let checklist, model.mode == .launcher {
+            switch command {
+            case .up, .down, .openSettings: break
+            case .escape: closeChecklist(reload: true); return
+            case .enter: confirm(checklist); return
+            case .toggle: checklist.toggle(at: model.selectedIndex); return
+            case .tab: return
+            }
+        }
         switch command {
         case .up: model.moveSelection(by: -1, count: itemRows.count)
         case .down: model.moveSelection(by: 1, count: itemRows.count)
         case .escape: model.hide()
         case .openSettings: onOpenSettings?()
         case .enter: activateSelection()
+        case .toggle: break
         case .tab:
             if model.mode == .clipboard {
                 handleKey(.down)
@@ -450,6 +504,7 @@ enum PanelRow {
         case .runCommand(let name, let argument):
             switch launcher.runCommand(name: name, argument: argument) {
             case .done, nil: model.hide()
+            case .confirm(let list): show(list, command: name)
             }
         case .openApp, .copyText:
             model.hide()
@@ -458,7 +513,52 @@ enum PanelRow {
     }
 
     public func controlTextDidChange(_ obj: Notification) {
+        closeChecklist(reload: false)
+        statusMessage = nil
         model.setQuery(searchField.stringValue)
+    }
+
+    // MARK: Checklist
+
+    func show(_ list: Checklist, command: String) {
+        checklist = list
+        checklistCommand = command
+        list.onChange = { [weak self, weak list] in
+            guard let self, let list, self.checklist === list else { return }
+            self.tableView.reloadData()
+            self.updateSelection()
+        }
+        reloadItems()
+        model.moveSelection(by: -model.selectedIndex, count: itemRows.count)
+        checklistSizes = Task { await list.loadSizes() }
+    }
+
+    func closeChecklist(reload: Bool) {
+        guard checklist != nil else { return }
+        checklist?.onChange = nil
+        checklist = nil
+        checklistCommand = nil
+        checklistSizes?.cancel()
+        checklistSizes = nil
+        if reload { reloadItems() }
+    }
+
+    private func confirm(_ list: Checklist) {
+        guard !list.isWorking, checklistTask == nil else { return }
+        let command = checklistCommand
+        checklistTask = Task { [weak self] in
+            let message = await list.confirm()
+            guard let self else { return }
+            self.checklistTask = nil
+            guard let message, self.checklist === list else { return }
+            self.closeChecklist(reload: false)
+            self.statusMessage = message
+            if let command { self.model.setQuery("/\(command) ") } else { self.reloadItems() }
+        }
+    }
+
+    static func size(_ bytes: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
     }
 
     public func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
@@ -478,9 +578,11 @@ enum PanelRow {
     @objc private func rowClicked() {
         guard let item = itemRows.firstIndex(of: tableView.clickedRow) else { return }
         model.moveSelection(by: item - model.selectedIndex, count: itemRows.count)
+        if checklist != nil { handleKey(.toggle) }   // a click ticks; only Enter confirms
     }
 
     @objc private func rowDoubleClicked() {
+        guard checklist == nil else { return }
         rowClicked()
         handleKey(.enter)
     }
@@ -504,6 +606,29 @@ enum PanelRow {
 
     public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         switch rows[row] {
+        case .note(let text):
+            let cell = tableView.makeView(withIdentifier: .init("note"), owner: nil) as? ItemCellView ?? {
+                let c = ItemCellView(); c.identifier = .init("note"); c.title.font = Theme.font(12); c.title.textColor = Theme.secondaryText; return c
+            }()
+            cell.iconSize = 18
+            cell.iconPath = nil
+            cell.iconView.image = Self.noteGlyph
+            cell.title.stringValue = text
+            cell.trailing.stringValue = ""
+            cell.needsLayout = true
+            return cell
+        case .check(let index):
+            let cell = tableView.makeView(withIdentifier: .init("check"), owner: nil) as? ItemCellView ?? {
+                let c = ItemCellView(); c.identifier = .init("check"); c.title.lineBreakMode = .byTruncatingMiddle; return c
+            }()
+            let item = checklist?.items[safe: index]
+            cell.iconSize = 18
+            cell.iconPath = nil
+            cell.iconView.image = item?.isChecked == false ? Self.uncheckedGlyph : Self.checkedGlyph
+            cell.title.stringValue = item?.title ?? ""
+            cell.trailing.stringValue = item?.bytes.map(Self.size) ?? "…"
+            cell.needsLayout = true
+            return cell
         case .header(let title):
             let cell = tableView.makeView(withIdentifier: .init("header"), owner: nil) as? HeaderCellView ?? {
                 let c = HeaderCellView(); c.identifier = .init("header"); return c
@@ -559,6 +684,15 @@ enum PanelRow {
     static let textGlyph = glyph("T", side: 18, fontSize: 10, radius: 4)
     /// "=" tile for calculator results, app-icon sized.
     static let calculatorGlyph = glyph("=", side: Theme.iconSize, fontSize: 17, radius: 7)
+    static let checkedGlyph = symbol("checkmark.square.fill", tint: .controlAccentColor)
+    static let uncheckedGlyph = symbol("square", tint: Theme.secondaryText)
+    static let noteGlyph = symbol("info.circle", tint: Theme.secondaryText)
+
+    private static func symbol(_ name: String, tint: NSColor) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(.init(paletteColors: [tint]))
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) ?? NSImage()
+    }
+
     /// "/" tile for commands.
     static let commandGlyph = glyph("/", side: Theme.iconSize, fontSize: 17, radius: 7)
 
@@ -573,4 +707,8 @@ enum PanelRow {
             return true
         }
     }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }

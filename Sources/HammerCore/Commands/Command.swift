@@ -35,6 +35,8 @@ public enum CommandArgument: Equatable, Sendable {
 public enum CommandOutcome {
     /// Finished: the panel closes.
     case done
+    /// Show this list for the person to review; Enter confirms it.
+    case confirm(Checklist)
 }
 
 /// A `/name` command in the launcher.

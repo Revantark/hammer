@@ -8,15 +8,16 @@ import HammerCore
               watcher: FakeWatcher = FakeWatcher()) -> AppComposition {
         AppComposition(dataDirectory: dir, pasteboard: FakePasteboard(), scanner: FakeScanner([app("Safari")]), watcher: watcher,
                        appLauncher: FakeAppLauncher(), pasteSender: FakePasteSender(), hotkeys: applier, clock: ManualClock(),
-                       runningApps: running, spotlightConflict: { _ in spotlightOwns })
+                       runningApps: running, trash: FakeTrash(), library: dir.appendingPathComponent("Library"), caskrooms: [],
+                       spotlightConflict: { _ in spotlightOwns })
     }
 
     let running = FakeRunningApps([RunningApp(pid: 42, name: "Zed", path: "/Applications/Zed.app")])
 
-    @Test func launcherHasKillAndQuitCommands() throws {
+    @Test func launcherHasKillQuitAndUninstallCommands() throws {
         let dir = makeTempDir(); defer { removeTempDir(dir) }
         let c = make(dir)
-        #expect(c.launcher.results(for: "/").map(\.title).contains(["/kill", "/quit"]))
+        #expect(c.launcher.results(for: "/").map(\.title) == ["/kill", "/quit", "/uninstall"])
         let row = try #require(c.launcher.results(for: "/kill zed").first)
         guard case .runCommand(let name, let argument) = row.action else { Issue.record("not a command"); return }
         _ = c.launcher.runCommand(name: name, argument: argument)

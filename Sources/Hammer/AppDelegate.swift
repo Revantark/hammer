@@ -35,7 +35,7 @@ import os
         composition = AppComposition(dataDirectory: dataDirectory, pasteboard: pasteboard,
                                      scanner: FileSystemAppScanner(), watcher: FSEventsWatcher(),
                                      appLauncher: WorkspaceAppLauncher(), pasteSender: CGEventPasteSender(),
-                                     hotkeys: hotKeyCenter, clock: SystemClock(), runningApps: WorkspaceRunningApps())
+                                     hotkeys: hotKeyCenter, clock: SystemClock(), runningApps: WorkspaceRunningApps(), trash: WorkspaceTrash())
         thumbnails = ClipThumbnails(clipboard: composition.clipboard)
         hotKeyCenter.onPress = { [weak self] role in self?.hotkeyPressed(role) }
 
@@ -79,6 +79,7 @@ import os
             controller?.handleKey(command)
             return true
         }
+        panel.onKeyDown = { [weak controller] event in controller?.handleKeyDown(event) ?? false }
         self.panel = panel
         panelController = controller
     }

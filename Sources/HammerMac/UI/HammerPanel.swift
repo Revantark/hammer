@@ -30,6 +30,14 @@ public final class HammerPanel: NSPanel {
         onResignKey?()
     }
 
+    /// Sees key presses before the focused view; return true to swallow one.
+    public var onKeyDown: ((NSEvent) -> Bool)?
+
+    public override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, onKeyDown?(event) == true { return }
+        super.sendEvent(event)
+    }
+
     public override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if onKeyEquivalent?(event) == true { return true }
         if let action = EditShortcuts.action(for: event), let responder = firstResponder,

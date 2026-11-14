@@ -141,3 +141,8 @@ func appOption(_ title: String) -> CommandOption {
     func forceQuit(pid: Int32) { forceQuit.append(pid); apps.removeAll { $0.pid == pid } }
     func waitForExit(pid: Int32, timeout: Duration) async -> Bool { !apps.contains { $0.pid == pid } }
 }
+
+@MainActor final class FakeTrash: Trashing {
+    private(set) var trashed: [URL] = []
+    func moveToTrash(_ url: URL) async throws { trashed.append(url) }
+}

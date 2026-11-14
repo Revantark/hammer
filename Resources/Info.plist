@@ -20,6 +20,8 @@
     <string>15.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Hammer asks Finder to move apps that need your password to the Trash when you uninstall them.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
 </dict>

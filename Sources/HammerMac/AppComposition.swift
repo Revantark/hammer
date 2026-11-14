@@ -18,7 +18,9 @@ import HammerCore
 
     public init(dataDirectory: URL, pasteboard: PasteboardAccess, scanner: AppScanning, watcher: DirectoryWatching,
                 appLauncher: AppLaunching, pasteSender: PasteSending, hotkeys: HotkeyApplying, clock: HammerClock,
-                runningApps: RunningAppControlling,
+                runningApps: RunningAppControlling, trash: Trashing,
+                library: URL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library"),
+                caskrooms: [URL] = HomebrewCasks.defaultCaskrooms,
                 spotlightConflict: @escaping (Hotkey) -> Bool = { SpotlightShortcut.conflicts(with: $0) }) {
         settingsStore = SettingsStore(fileURL: dataDirectory.appendingPathComponent("settings.json"))
         settings = settingsStore.load()
@@ -26,8 +28,12 @@ import HammerCore
         launcher = LauncherController(search: LauncherSearch(sources: [AppsSource(catalog: catalog)]),
                                       store: FrecencyStore(fileURL: dataDirectory.appendingPathComponent("frecency.json")),
                                       launcher: appLauncher, pasteboard: pasteboard, clock: clock,
-                                      commands: CommandRegistry([QuitAppCommand(force: true, apps: runningApps),
-                                                                 QuitAppCommand(force: false, apps: runningApps)]))
+                                      commands: CommandRegistry([
+                                          QuitAppCommand(force: true, apps: runningApps),
+                                          QuitAppCommand(force: false, apps: runningApps),
+                                          UninstallCommand(catalog: catalog, runningApps: runningApps, trash: trash, pasteboard: pasteboard,
+                                                           library: library, caskrooms: caskrooms, ownBundleID: Bundle.main.bundleIdentifier),
+                                      ]))
         clipboard = ClipboardController(pasteboard: pasteboard, store: ClipStore(directory: dataDirectory), clock: clock)
         self.pasteSender = pasteSender
         self.clock = clock
