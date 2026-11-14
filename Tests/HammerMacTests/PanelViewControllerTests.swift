@@ -177,3 +177,21 @@ import HammerCore
         #expect(cell.trailing.frame.width >= fullWidth(cell.trailing))
     }
 }
+
+@MainActor @Suite struct KeyHintsLayoutTests {
+    @Test(arguments: [[("Move to Trash", "↵"), ("Toggle", "Space"), ("Back", "esc")],
+                      [("Open", "↵"), ("Clipboard", "⌥X")],
+                      [("Paste", "↵"), ("Launcher", "⌘Space")]])
+    func hintLabelsAreNeverCut(hints: [(String, String)]) throws {
+        let view = KeyHintsView()
+        view.setHints(hints.map { (label: $0.0, key: $0.1) })
+        view.frame = NSRect(origin: .zero, size: view.fittingSize)
+        view.layoutSubtreeIfNeeded()
+        let labels = view.arrangedSubviews.compactMap { $0 as? NSTextField }
+        #expect(labels.count == hints.count)
+        for label in labels {
+            let needed = label.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: 100)).width
+            #expect(label.frame.width >= needed, "\(label.stringValue): \(label.frame.width) < \(needed)")
+        }
+    }
+}

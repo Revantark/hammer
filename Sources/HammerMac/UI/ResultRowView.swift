@@ -114,7 +114,10 @@ final class KeyHintsView: NSStackView {
         spacing = 6
         for (i, hint) in hints.enumerated() {
             if i > 0 { addArrangedSubview(NSView(frame: NSRect(x: 0, y: 0, width: 8, height: 1))) }
-            addArrangedSubview(makeLabel(Theme.font(12), Theme.secondaryText).withText(hint.label))
+            let label = makeLabel(Theme.font(12), Theme.secondaryText).withText(hint.label)
+            // Text widths are fractional; the stack would round "Toggle" (42.04 pt) down to 42 and cut it.
+            label.widthAnchor.constraint(equalToConstant: ceil(label.intrinsicContentSize.width) + 1).isActive = true
+            addArrangedSubview(label)
             addArrangedSubview(KeyCapView(hint.key))
         }
     }

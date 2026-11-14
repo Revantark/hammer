@@ -684,12 +684,13 @@ enum PanelRow {
     static let textGlyph = glyph("T", side: 18, fontSize: 10, radius: 4)
     /// "=" tile for calculator results, app-icon sized.
     static let calculatorGlyph = glyph("=", side: Theme.iconSize, fontSize: 17, radius: 7)
-    static let checkedGlyph = symbol("checkmark.square.fill", tint: .controlAccentColor)
+    static let checkedGlyph = symbol("checkmark.square.fill", tint: .white, .controlAccentColor)
     static let uncheckedGlyph = symbol("square", tint: Theme.secondaryText)
     static let noteGlyph = symbol("info.circle", tint: Theme.secondaryText)
 
-    private static func symbol(_ name: String, tint: NSColor) -> NSImage {
-        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(.init(paletteColors: [tint]))
+    /// `tint`: one color per symbol layer (checkmark, then box).
+    private static func symbol(_ name: String, tint: NSColor...) -> NSImage {
+        let config = NSImage.SymbolConfiguration(pointSize: 14, weight: .regular).applying(.init(paletteColors: tint))
         return NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(config) ?? NSImage()
     }
 
