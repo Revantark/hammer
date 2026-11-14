@@ -35,7 +35,7 @@ import os
         composition = AppComposition(dataDirectory: dataDirectory, pasteboard: pasteboard,
                                      scanner: FileSystemAppScanner(), watcher: FSEventsWatcher(),
                                      appLauncher: WorkspaceAppLauncher(), pasteSender: CGEventPasteSender(),
-                                     hotkeys: hotKeyCenter, clock: SystemClock())
+                                     hotkeys: hotKeyCenter, clock: SystemClock(), runningApps: WorkspaceRunningApps())
         thumbnails = ClipThumbnails(clipboard: composition.clipboard)
         hotKeyCenter.onPress = { [weak self] role in self?.hotkeyPressed(role) }
 

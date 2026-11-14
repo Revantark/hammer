@@ -18,13 +18,16 @@ import HammerCore
 
     public init(dataDirectory: URL, pasteboard: PasteboardAccess, scanner: AppScanning, watcher: DirectoryWatching,
                 appLauncher: AppLaunching, pasteSender: PasteSending, hotkeys: HotkeyApplying, clock: HammerClock,
+                runningApps: RunningAppControlling,
                 spotlightConflict: @escaping (Hotkey) -> Bool = { SpotlightShortcut.conflicts(with: $0) }) {
         settingsStore = SettingsStore(fileURL: dataDirectory.appendingPathComponent("settings.json"))
         settings = settingsStore.load()
         catalog = AppCatalog(scanner: scanner)
         launcher = LauncherController(search: LauncherSearch(sources: [AppsSource(catalog: catalog)]),
                                       store: FrecencyStore(fileURL: dataDirectory.appendingPathComponent("frecency.json")),
-                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock)
+                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock,
+                                      commands: CommandRegistry([QuitAppCommand(force: true, apps: runningApps),
+                                                                 QuitAppCommand(force: false, apps: runningApps)]))
         clipboard = ClipboardController(pasteboard: pasteboard, store: ClipStore(directory: dataDirectory), clock: clock)
         self.pasteSender = pasteSender
         self.clock = clock

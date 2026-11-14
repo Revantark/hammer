@@ -127,3 +127,17 @@ func solidIcon(size: CGFloat = 64) -> NSImage {
 func appOption(_ title: String) -> CommandOption {
     CommandOption(id: "/Applications/\(title).app", title: title, iconPath: "/Applications/\(title).app")
 }
+
+@MainActor final class FakeRunningApps: RunningAppControlling {
+    var apps: [RunningApp]
+    private(set) var quit: [Int32] = []
+    private(set) var forceQuit: [Int32] = []
+    var exitsWhenAsked = true
+
+    init(_ apps: [RunningApp] = []) { self.apps = apps }
+
+    func runningApps() -> [RunningApp] { apps }
+    func quit(pid: Int32) { quit.append(pid); if exitsWhenAsked { apps.removeAll { $0.pid == pid } } }
+    func forceQuit(pid: Int32) { forceQuit.append(pid); apps.removeAll { $0.pid == pid } }
+    func waitForExit(pid: Int32, timeout: Duration) async -> Bool { !apps.contains { $0.pid == pid } }
+}
