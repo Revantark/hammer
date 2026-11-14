@@ -79,10 +79,10 @@ func solidIcon(size: CGFloat = 64) -> NSImage {
     }()
     var thumbnails: ThumbnailSource = StubThumbnails()
 
-    init(apps: [AppEntry] = [app("Safari"), app("Notes"), app("Slack")]) {
+    init(apps: [AppEntry] = [app("Safari"), app("Notes"), app("Slack")], commands: [HammerCommand] = []) {
         let search = LauncherSearch(sources: [AppsSource(catalog: AppCatalog(scanner: FakeScanner(apps)))])
         launcher = LauncherController(search: search, store: FrecencyStore(fileURL: dir.appendingPathComponent("f.json")),
-                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock)
+                                      launcher: appLauncher, pasteboard: pasteboard, clock: clock, commands: CommandRegistry(commands))
         clipboard = ClipboardController(pasteboard: pasteboard, store: ClipStore(directory: dir), clock: clock)
     }
 
@@ -101,4 +101,29 @@ func solidIcon(size: CGFloat = 64) -> NSImage {
     private(set) var started = false
     func start(paths: [URL], onChange: @escaping @MainActor () -> Void) { started = true }
     func stop() { started = false }
+}
+
+@MainActor final class FakeCommand: HammerCommand {
+    let name: String
+    let summary: String
+    let argument: CommandArgumentKind
+    let optionsTitle = "Running Apps"
+    let actionLabel: String
+    var choices: [CommandOption] = []
+    private(set) var runs: [CommandArgument] = []
+    var outcome: CommandOutcome = .done
+
+    init(_ name: String, summary: String = "Does a thing", argument: CommandArgumentKind = .option, actionLabel: String = "Force Quit") {
+        self.name = name
+        self.summary = summary
+        self.argument = argument
+        self.actionLabel = actionLabel
+    }
+
+    func options() -> [CommandOption] { choices }
+    func run(_ argument: CommandArgument) -> CommandOutcome { runs.append(argument); return outcome }
+}
+
+func appOption(_ title: String) -> CommandOption {
+    CommandOption(id: "/Applications/\(title).app", title: title, iconPath: "/Applications/\(title).app")
 }

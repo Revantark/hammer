@@ -3,6 +3,8 @@ import HammerCore
 
 public enum PanelKeyCommand: Equatable, Sendable {
     case up, down, enter, escape, openSettings
+    /// Clipboard: next entry. Launcher: fills in the selected "/command ".
+    case tab
 
     /// Maps key equivalents that reach the panel (⌘,).
     public static func from(_ event: NSEvent) -> PanelKeyCommand? {
@@ -251,9 +253,13 @@ enum PanelRow {
         _ = view
         lastMode = model.mode
         lastQuery = model.query
-        if searchField.stringValue != model.query { searchField.stringValue = model.query }
+        if searchField.stringValue != model.query {
+            searchField.stringValue = model.query
+            // Filled in by Tab/Enter on a command: keep typing after it.
+            searchField.currentEditor()?.selectedRange = NSRange(location: (model.query as NSString).length, length: 0)
+        }
         searchField.placeholderAttributedString = NSAttributedString(
-            string: model.mode == .launcher ? "Search apps…" : "Search clipboard…",
+            string: model.mode == .launcher ? "Search apps, or / for commands…" : "Search clipboard…",
             attributes: [.foregroundColor: Theme.secondaryText, .font: Theme.font(Theme.searchFontSize)])
         buildRows()
         tableView.reloadData()
@@ -306,7 +312,7 @@ enum PanelRow {
         iconPrefetch?.cancel()
         iconPrefetch = nil
         let paths = results.prefix(Self.iconPrefetchLimit).compactMap { result -> String? in
-            guard case .openApp(let path) = result.action, icons.cachedIcon(forPath: path) == nil else { return nil }
+            guard let path = Self.iconPath(for: result), icons.cachedIcon(forPath: path) == nil else { return nil }
             return path
         }
         guard !paths.isEmpty else { return }
@@ -378,9 +384,27 @@ enum PanelRow {
             footerRight.setHints([("Paste", "↵"), ("Launcher", s.launcherHotkey.displayString)])
         } else {
             footerLeft.stringValue = "Hammer"
-            var enterLabel = "Open"
-            if results.indices.contains(model.selectedIndex), case .copyText = results[model.selectedIndex].action { enterLabel = "Copy" }
+            let enterLabel = results.indices.contains(model.selectedIndex) ? Self.enterLabel(for: results[model.selectedIndex]) : "Open"
             footerRight.setHints([(enterLabel, "↵"), ("Clipboard", s.clipboardHotkey.displayString)])
+        }
+    }
+
+    static func enterLabel(for result: LauncherResult) -> String {
+        switch result.action {
+        case .openApp: "Open"
+        case .copyText: "Copy"
+        case .completeCommand: "Select"
+        case .runCommand(_, .none): "Run"
+        case .runCommand: result.typeLabel
+        }
+    }
+
+    /// The file whose icon a launcher row shows; nil for glyph rows (calculator, commands).
+    static func iconPath(for result: LauncherResult) -> String? {
+        switch result.action {
+        case .openApp(let path): path
+        case .runCommand(_, .option(let option)): option.iconPath
+        case .copyText, .completeCommand, .runCommand: nil
         }
     }
 
@@ -403,6 +427,12 @@ enum PanelRow {
         case .escape: model.hide()
         case .openSettings: onOpenSettings?()
         case .enter: activateSelection()
+        case .tab:
+            if model.mode == .clipboard {
+                handleKey(.down)
+            } else if results.indices.contains(model.selectedIndex), case .completeCommand(let name) = results[model.selectedIndex].action {
+                model.setQuery("/\(name) ")
+            }
         }
     }
 
@@ -414,8 +444,17 @@ enum PanelRow {
         }
         guard results.indices.contains(model.selectedIndex) else { return }
         let result = results[model.selectedIndex]
-        model.hide()
-        launcher.perform(result)
+        switch result.action {
+        case .completeCommand(let name):
+            model.setQuery("/\(name) ")
+        case .runCommand(let name, let argument):
+            switch launcher.runCommand(name: name, argument: argument) {
+            case .done, nil: model.hide()
+            }
+        case .openApp, .copyText:
+            model.hide()
+            launcher.perform(result)
+        }
     }
 
     public func controlTextDidChange(_ obj: Notification) {
@@ -428,8 +467,8 @@ enum PanelRow {
         case #selector(NSResponder.moveDown(_:)): handleKey(.down)
         case #selector(NSResponder.insertNewline(_:)): handleKey(.enter)
         case #selector(NSResponder.cancelOperation(_:)): handleKey(.escape)
-        // Clipboard: Tab / ⇧Tab step through entries. Launcher: swallowed so focus never leaves the search field.
-        case #selector(NSResponder.insertTab(_:)): if model.mode == .clipboard { handleKey(.down) }
+        // Clipboard: Tab / ⇧Tab step through entries. Launcher: Tab completes a command; never moves focus off the search field.
+        case #selector(NSResponder.insertTab(_:)): handleKey(.tab)
         case #selector(NSResponder.insertBacktab(_:)): if model.mode == .clipboard { handleKey(.up) }
         default: return false
         }
@@ -478,11 +517,7 @@ enum PanelRow {
             cell.title.stringValue = result.title
             cell.trailing.stringValue = result.typeLabel
             cell.iconSize = Theme.iconSize
-            switch result.action {
-            case .copyText:
-                cell.iconPath = nil
-                cell.iconView.image = Self.calculatorGlyph
-            case .openApp(let path):
+            if let path = Self.iconPath(for: result) {
                 cell.iconPath = path
                 cell.iconView.image = icons.cachedIcon(forPath: path)
                 if cell.iconView.image == nil {
@@ -491,6 +526,9 @@ enum PanelRow {
                         if let cell, cell.iconPath == path { cell.iconView.image = icon }
                     }
                 }
+            } else {
+                cell.iconPath = nil
+                if case .copyText = result.action { cell.iconView.image = Self.calculatorGlyph } else { cell.iconView.image = Self.commandGlyph }
             }
             cell.needsLayout = true
             return cell
@@ -521,6 +559,8 @@ enum PanelRow {
     static let textGlyph = glyph("T", side: 18, fontSize: 10, radius: 4)
     /// "=" tile for calculator results, app-icon sized.
     static let calculatorGlyph = glyph("=", side: Theme.iconSize, fontSize: 17, radius: 7)
+    /// "/" tile for commands.
+    static let commandGlyph = glyph("/", side: Theme.iconSize, fontSize: 17, radius: 7)
 
     private static func glyph(_ text: String, side: CGFloat, fontSize: CGFloat, radius: CGFloat) -> NSImage {
         NSImage(size: NSSize(width: side, height: side), flipped: false) { rect in

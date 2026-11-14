@@ -14,10 +14,13 @@ import os
     private let launcher: AppLaunching
     private let pasteboard: PasteboardAccess
     private let clock: HammerClock
+    private let commands: CommandRegistry
     private var frecency: Frecency
 
-    public init(search: LauncherSearch, store: FrecencyStore, launcher: AppLaunching, pasteboard: PasteboardAccess, clock: HammerClock) {
+    public init(search: LauncherSearch, store: FrecencyStore, launcher: AppLaunching, pasteboard: PasteboardAccess, clock: HammerClock,
+                commands: CommandRegistry? = nil) {
         self.search = search
+        self.commands = commands ?? CommandRegistry([])
         self.store = store
         self.launcher = launcher
         self.pasteboard = pasteboard
@@ -25,8 +28,9 @@ import os
         frecency = store.load()
     }
 
-    /// A calculation's result first (when the query is one), then apps.
+    /// "/…" queries show only commands. Otherwise a calculation's result first (when the query is one), then apps.
     public func results(for query: String) -> [LauncherResult] {
+        if let commandRows = commands.results(for: query) { return commandRows }
         let apps = search.search(query, frecency: frecency, now: clock.now())
         return Calculator.result(for: query).map { [$0] + apps } ?? apps
     }
@@ -38,6 +42,8 @@ import os
         case .copyText(let text):
             pasteboard.write([Representation(type: PasteboardType.plainText, data: Data(text.utf8))])
             return   // not an app: no usage to record
+        case .completeCommand, .runCommand:
+            return   // the panel handles these (it fills in the query or calls `runCommand`)
         }
         frecency.recordUse(id: result.id, at: clock.now())
         do {
@@ -45,5 +51,10 @@ import os
         } catch {
             Self.log.error("Saving usage failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Nil when no command has that name. Commands don't count toward app usage.
+    public func runCommand(name: String, argument: CommandArgument) -> CommandOutcome? {
+        commands.run(name: name, argument: argument)
     }
 }

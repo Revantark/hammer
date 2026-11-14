@@ -5,6 +5,9 @@ public enum LauncherAction: Equatable, Sendable {
     case openApp(path: String)
     /// Puts the text on the clipboard (calculator results).
     case copyText(String)
+    /// A "/name" row for a command that takes an argument: Enter or Tab fills in "/name " to show its options.
+    case completeCommand(String)
+    case runCommand(name: String, argument: CommandArgument)
 }
 
 public struct LauncherResult: Equatable, Sendable, Identifiable {

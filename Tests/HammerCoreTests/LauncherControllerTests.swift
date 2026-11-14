@@ -4,10 +4,32 @@ import Testing
 
 @MainActor @Suite struct LauncherControllerTests {
     func make(_ apps: [AppEntry], storeURL: URL, launcher: FakeAppLauncher = FakeAppLauncher(),
-              pasteboard: FakePasteboard = FakePasteboard()) -> LauncherController {
+              pasteboard: FakePasteboard = FakePasteboard(), commands: [HammerCommand] = []) -> LauncherController {
         let search = LauncherSearch(sources: [AppsSource(catalog: AppCatalog(scanner: FakeScanner(apps)))])
         return LauncherController(search: search, store: FrecencyStore(fileURL: storeURL), launcher: launcher,
-                                  pasteboard: pasteboard, clock: ManualClock())
+                                  pasteboard: pasteboard, clock: ManualClock(), commands: CommandRegistry(commands))
+    }
+
+    @Test func slashShowsOnlyCommandsNotAppsOrCalculations() {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let kill = FakeCommand("kill")
+        let c = make([app("Kill Switch")], storeURL: dir.appendingPathComponent("f.json"), commands: [kill])
+        #expect(c.results(for: "/").map(\.title) == ["/kill"])
+        #expect(c.results(for: "/8").isEmpty)
+        #expect(c.results(for: "kill").map(\.title) == ["Kill Switch"])
+    }
+
+    @Test func runningACommandDoesNotRecordUsage() throws {
+        let dir = makeTempDir(); defer { removeTempDir(dir) }
+        let url = dir.appendingPathComponent("f.json")
+        let kill = FakeCommand("kill")
+        kill.choices = [option("Zed")]
+        let c = make([], storeURL: url, commands: [kill])
+        let row = try #require(c.results(for: "/kill ze").first)
+        guard case .runCommand(let name, let argument) = row.action else { Issue.record("not a command row"); return }
+        #expect(c.runCommand(name: name, argument: argument) != nil)
+        #expect(kill.runs == [.option(option("Zed"))])
+        #expect(FrecencyStore(fileURL: url).load().records.isEmpty)
     }
 
     @Test func calculationComesFirstAndEnterCopiesWithoutRecordingUsage() {
